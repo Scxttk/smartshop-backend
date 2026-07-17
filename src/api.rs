@@ -72,8 +72,11 @@ pub fn serve(port: u16, db_path: String) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
-        println!("HTTP-API läuft auf http://0.0.0.0:{port} (DB: {db_path})");
-        axum::serve(listener, router(db_path)).await?;
+        println!(
+            "Web-UI läuft auf http://0.0.0.0:{port}, JSON-API auf http://0.0.0.0:{port}/api (DB: {db_path})"
+        );
+        let app = crate::web::router(db_path.clone()).nest("/api", router(db_path));
+        axum::serve(listener, app).await?;
         Ok(())
     })
 }
