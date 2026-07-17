@@ -57,6 +57,106 @@ fn fixture_db(name: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn watch_add_list_remove_roundtrip() {
+    let dbf = fixture_db("watch_crud");
+    let db = dbf.to_str().unwrap();
+    let (stdout, _, ok) = run(&["watch", "add", "Butter", "--max-price", "1.50", "--db", db]);
+    assert!(ok);
+    assert!(stdout.contains("Watch #1 angelegt"), "stdout: {stdout}");
+    let (stdout, _, ok) = run(&["watch", "list", "--db", db]);
+    assert!(ok);
+    assert!(stdout.contains("Butter") && stdout.contains("1.50 €"), "stdout: {stdout}");
+    let (stdout, _, ok) = run(&["watch", "remove", "1", "--db", db]);
+    assert!(ok);
+    assert!(stdout.contains("entfernt"), "stdout: {stdout}");
+    let (stdout, _, ok) = run(&["watch", "remove", "1", "--db", db]);
+    assert!(ok);
+    assert!(stdout.contains("Kein Watch"), "stdout: {stdout}");
+}
+
+#[test]
+fn watch_check_exits_1_on_hits() {
+    let dbf = fixture_db("watch_hit");
+    let db = dbf.to_str().unwrap();
+    run(&["watch", "add", "Butter", "--max-price", "1.50", "--db", db]);
+    let (stdout, _, ok) = run(&["watch", "check", "--db", db]);
+    assert!(!ok, "Exit-Code 1 erwartet, stdout: {stdout}");
+    // Nur das Angebot unter 1.50 € trifft
+    assert!(stdout.contains("1 Treffer"), "stdout: {stdout}");
+    assert!(stdout.contains("1.39 €"), "stdout: {stdout}");
+    assert!(!stdout.contains("1.59 €"), "stdout: {stdout}");
+}
+
+#[test]
+fn watch_check_exits_0_without_hits() {
+    let dbf = fixture_db("watch_miss");
+    let db = dbf.to_str().unwrap();
+    run(&["watch", "add", "Gibtesnicht", "--db", db]);
+    let (stdout, _, ok) = run(&["watch", "check", "--db", db]);
+    assert!(ok, "Exit-Code 0 erwartet, stdout: {stdout}");
+    assert!(stdout.contains("keine Treffer"), "stdout: {stdout}");
+}
+
+#[test]
+fn list_suggest_shows_cheapest_market() {
+    let dbf = fixture_db("suggest");
+    let db = dbf.to_str().unwrap();
+    run(&["list", "add", "Butter", "--db", db]);
+    run(&["list", "add", "Raumschiff", "--db", db]);
+    let (stdout, _, ok) = run(&["list", "suggest", "--db", db]);
+    assert!(ok);
+    // Günstigster Markt (Zwei, 1.39) gewinnt, inkl. Grundpreis und Ersparnis
+    assert!(stdout.contains("1.39 € bei Testmarkt Zwei"), "stdout: {stdout}");
+    assert!(stdout.contains("5.56 €/kg"), "stdout: {stdout}");
+    assert!(stdout.contains("spart 0.20 € gegenüber Testmarkt Eins"), "stdout: {stdout}");
+    assert!(stdout.contains("Raumschiff") && stdout.contains("keine Angebote"), "stdout: {stdout}");
+}
+
+#[test]
+fn deals_lists_price_drops_biggest_first() {
+    let dbf = fixture_db("deals");
+    let db = dbf.to_str().unwrap();
+    // Synthetischer Verlauf: o1 war 1.00 € teurer, o4 0.50 € teurer
+    let conn = smartshop::db::open(db).unwrap();
+    conn.execute_batch(
+        "INSERT INTO price_history (offer_id, market_id, title, price, seen_at)
+         VALUES ('o1', 'M1', 'MEGGLE Feine Butter', 2.59, date('now', '-7 days')),
+                ('o4', 'M2', 'Käse \"Extra\", gereift', 3.49, date('now', '-7 days'));",
+    )
+    .unwrap();
+    drop(conn);
+    let (stdout, _, ok) = run(&["deals", "--db", db]);
+    assert!(ok);
+    assert!(stdout.contains("Preissenkungen (2)"), "stdout: {stdout}");
+    // Größter Preissturz zuerst
+    let pos_big = stdout.find("-1.00 €").expect("größter Drop fehlt");
+    let pos_small = stdout.find("-0.50 €").expect("kleiner Drop fehlt");
+    assert!(pos_big < pos_small, "stdout: {stdout}");
+    assert!(stdout.contains("1.59 € statt 2.59 €"), "stdout: {stdout}");
+}
+
+#[test]
+fn deals_since_filters_old_drops() {
+    let dbf = fixture_db("deals_since");
+    let db = dbf.to_str().unwrap();
+    // Drop, dessen letzter Stand 10 Tage alt ist (altes Angebot verschwunden)
+    let conn = smartshop::db::open(db).unwrap();
+    conn.execute_batch(
+        "INSERT INTO price_history (offer_id, market_id, title, price, seen_at)
+         VALUES ('alt', 'M1', 'Altes Produkt', 5.00, date('now', '-20 days')),
+                ('alt', 'M1', 'Altes Produkt', 3.00, date('now', '-10 days'));",
+    )
+    .unwrap();
+    drop(conn);
+    let (stdout, _, ok) = run(&["deals", "--since", "3", "--db", db]);
+    assert!(ok);
+    assert!(stdout.contains("Keine Preissenkungen"), "stdout: {stdout}");
+    let (stdout, _, ok) = run(&["deals", "--since", "14", "--db", db]);
+    assert!(ok);
+    assert!(stdout.contains("Altes Produkt"), "stdout: {stdout}");
+}
+
+#[test]
 fn search_finds_offers_by_title() {
     let dbf = fixture_db("search");
     let (stdout, _, ok) = run(&["search", "Butter", "--db", dbf.to_str().unwrap()]);
