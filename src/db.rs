@@ -235,6 +235,47 @@ pub fn price_history(conn: &Connection, query: &str) -> Result<Vec<PricePoint>> 
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
+pub struct PriceDrop {
+    pub title: String,
+    pub market_id: String,
+    pub old_price: f64,
+    pub new_price: f64,
+    pub old_seen_at: String,
+    pub new_seen_at: String,
+}
+
+/// Preissenkungen: pro Angebot den letzten Preisverlaufs-Eintrag mit dem
+/// vorherigen vergleichen; nur Verbilligungen, größter Preissturz zuerst.
+/// since_days begrenzt auf Einträge, deren letzter Stand nicht älter ist.
+pub fn price_drops(conn: &Connection, since_days: Option<i64>) -> Result<Vec<PriceDrop>> {
+    let mut stmt = conn.prepare(
+        "WITH ranked AS (
+            SELECT offer_id, market_id, title, price, seen_at,
+                   ROW_NUMBER() OVER (PARTITION BY offer_id ORDER BY seen_at DESC) AS rn
+            FROM price_history
+            WHERE price IS NOT NULL
+        )
+        SELECT l.title, l.market_id, p.price, l.price, p.seen_at, l.seen_at
+        FROM ranked l
+        JOIN ranked p ON p.offer_id = l.offer_id AND p.rn = 2
+        WHERE l.rn = 1
+          AND l.price < p.price
+          AND (?1 IS NULL OR l.seen_at >= date('now', '-' || ?1 || ' days'))
+        ORDER BY (p.price - l.price) DESC",
+    )?;
+    let rows = stmt.query_map(params![since_days], |row| {
+        Ok(PriceDrop {
+            title: row.get(0)?,
+            market_id: row.get(1)?,
+            old_price: row.get(2)?,
+            new_price: row.get(3)?,
+            old_seen_at: row.get(4)?,
+            new_seen_at: row.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 pub fn search_offers(conn: &Connection, query: &str, max_price: Option<f64>) -> Result<Vec<Offer>> {
     let mut stmt = conn.prepare(
         "SELECT id, market_id, title, subtitle, overline, price, regular_price,
