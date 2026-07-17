@@ -140,6 +140,12 @@ enum WatchAction {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// Watchlist gegen die gespeicherten Angebote prüfen (Exit-Code 1 bei Treffern)
+    Check {
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
     /// Eintrag aus der Watchlist entfernen
     Remove {
         /// ID des Eintrags (siehe `watch list`)
@@ -169,6 +175,34 @@ fn main() -> Result<()> {
     }
 }
 
+/// Alle Watches gegen die gespeicherten Angebote prüfen und Treffer gruppiert
+/// ausgeben. Liefert true, wenn es mindestens einen Treffer gab.
+fn print_watch_hits(conn: &rusqlite::Connection) -> Result<bool> {
+    let watches = db::watches(conn)?;
+    if watches.is_empty() {
+        println!("Watchlist ist leer. Mit `smartshop watch add <Suchbegriff>` anlegen.");
+        return Ok(false);
+    }
+    let mut any = false;
+    for w in &watches {
+        let hits = db::watch_hits(conn, w)?;
+        let limit = w
+            .max_price
+            .map(|p| format!(" (bis {p:.2} €)"))
+            .unwrap_or_default();
+        if hits.is_empty() {
+            println!("#{} '{}'{limit}: keine Treffer.", w.id, w.query);
+            continue;
+        }
+        any = true;
+        println!("#{} '{}'{limit}: {} Treffer", w.id, w.query, hits.len());
+        for offer in &hits {
+            println!("  {}", format_offer(offer));
+        }
+    }
+    Ok(any)
+}
+
 fn watch(action: WatchAction) -> Result<()> {
     match action {
         WatchAction::Add { query, max_price, db } => {
@@ -194,6 +228,15 @@ fn watch(action: WatchAction) -> Result<()> {
                     .map(|p| format!("{p:.2} €"))
                     .unwrap_or_else(|| "-".to_string());
                 println!("  {:>4}  {:<30} {:>10}  {}", w.id, w.query, max, w.created_at);
+            }
+            Ok(())
+        }
+        WatchAction::Check { db } => {
+            let conn = db::open(&db)?;
+            let hits = print_watch_hits(&conn)?;
+            if hits {
+                // Cron-tauglich: Exit-Code 1 signalisiert "es gibt Treffer"
+                std::process::exit(1);
             }
             Ok(())
         }
