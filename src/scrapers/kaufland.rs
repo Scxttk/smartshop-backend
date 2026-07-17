@@ -64,7 +64,11 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
     Ok(offers)
 }
 
-fn parse_offers(html: &str, market_id: &str) -> Result<Vec<Offer>> {
+// Kaufland listet dasselbe Angebot in mehreren Kategorien (z. B. in der
+// Warengruppe und zusätzlich in "Unsere Knüller"). Es wird bewusst nicht
+// hier dedupliziert: die Duplikate teilen dieselbe Offer-ID und werden beim
+// DB-Upsert zusammengeführt.
+pub fn parse_offers(html: &str, market_id: &str) -> Result<Vec<Offer>> {
     let doc = Html::parse_document(html);
     let sel_section = sel("div.k-product-section");
     let sel_headline = sel("h2.k-product-section__headline");
