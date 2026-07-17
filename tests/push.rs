@@ -70,6 +70,18 @@ fn map_drops_pure_quantity_subtitle() {
     o.subtitle = Some("je 250-g-Packg.".to_string());
     let row = map_offer(&o, "REWE", None).unwrap();
     assert_eq!(row.product, "Gouda");
+    // …aber die Menge landet im unit-Feld statt "Stück"
+    assert_eq!(row.unit, "je 250-g-Packg.");
+}
+
+#[test]
+fn map_puts_multipack_quantity_into_unit() {
+    let mut o = offer("MILPRIMA Haltbare fettarme Milch", Some(7.8));
+    o.subtitle = Some("je 12 x 1 l".to_string());
+    let row = map_offer(&o, "Penny", None).unwrap();
+    assert_eq!(row.unit, "je 12 x 1 l");
+    assert_eq!(row.base_unit.as_deref(), Some("l"));
+    assert_eq!(row.base_price, Some(0.65));
 }
 
 #[test]
