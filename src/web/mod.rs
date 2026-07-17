@@ -53,6 +53,7 @@ pub fn router(db_path: String) -> Router {
     Router::new()
         .route("/", get(overview))
         .route("/search", get(search))
+        .route("/compare", get(compare))
         .with_state(Arc::new(WebState { db_path }))
 }
 
@@ -200,4 +201,72 @@ fn urlencode(s: &str) -> String {
         }
     }
     out
+}
+
+// ---------- /compare ----------
+
+/// Gruppierung wie in api::get_compare / CLI-compare: nach normalisiertem
+/// Produktnamen, Reihenfolge des Auftretens; innerhalb der Gruppe günstigster
+/// zuerst; gleicher Markt + gleicher Preis nur einmal.
+fn compare_groups(offers: &[Offer]) -> Vec<(String, Vec<&Offer>)> {
+    let mut groups: Vec<(String, Vec<&Offer>)> = Vec::new();
+    for offer in offers {
+        let key = units::normalize_name(&display_name(offer));
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, list)) => list.push(offer),
+            None => groups.push((key, vec![offer])),
+        }
+    }
+    let mut result = Vec::new();
+    for (_, mut group) in groups {
+        group.sort_by(|a, b| {
+            a.price
+                .unwrap_or(f64::INFINITY)
+                .total_cmp(&b.price.unwrap_or(f64::INFINITY))
+        });
+        let name = display_name(group[0]);
+        let mut printed = std::collections::HashSet::new();
+        let deduped: Vec<&Offer> = group
+            .into_iter()
+            .filter(|o| printed.insert((o.market_id.clone(), o.price.map(|p| (p * 100.0) as i64))))
+            .collect();
+        result.push((name, deduped));
+    }
+    result
+}
+
+async fn compare(
+    State(state): SharedState,
+    Query(params): Query<QueryParam>,
+) -> Result<Html<String>, WebError> {
+    let q = params.q.unwrap_or_default();
+    let mut body = search_form("/compare", "q", &q, "Produkt");
+    if !q.is_empty() {
+        let conn = db::open(&state.db_path)?;
+        let offers = db::search_offers_broad(&conn, &q)?;
+        if offers.is_empty() {
+            body.push_str(&format!(
+                "<p class=\"hinweis\">Keine Angebote für '{}' gefunden.</p>",
+                escape(&q)
+            ));
+        } else {
+            let names = market_names(&conn)?;
+            for (name, group) in compare_groups(&offers) {
+                body.push_str(&format!("<h2>{}</h2>", escape(&name)));
+                let rows: Vec<Vec<String>> = group
+                    .iter()
+                    .map(|o| {
+                        vec![
+                            escape(names.get(&o.market_id).unwrap_or(&o.market_id)),
+                            price(o.price),
+                            unit_price_str(o).map(|u| escape(&u)).unwrap_or_else(|| "–".into()),
+                            o.subtitle.as_deref().map(escape).unwrap_or_default(),
+                        ]
+                    })
+                    .collect();
+                body.push_str(&table(&["Markt", ">Preis", ">Grundpreis", "Details"], &rows));
+            }
+        }
+    }
+    Ok(Html(page("Vergleich", &body)))
 }
