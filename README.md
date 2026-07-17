@@ -276,6 +276,21 @@ unter [`supabase/`](supabase/) — `schema.sql` + Migrationen; neue Projekte:
 `setup_full.sql`, dann `migration_regions.sql`, dann
 `migration_v3_multi_region.sql` im SQL-Editor ausführen.
 
+## Preis-Historie
+
+Zusätzlich zur wochenaktuellen `offers`-Tabelle schreibt jeder Push dieselben
+Zeilen in die Supabase-Tabelle `price_history` (nicht zu verwechseln mit der
+gleichnamigen lokalen SQLite-Tabelle) — als dauerhafter Wochen-Schnappschuss,
+damit die App später Preisverläufe anzeigen kann. Upsert-Schlüssel ist
+`(market, product, region, valid_from)`: Ein erneuter Push derselben Woche
+aktualisiert die Zeilen, statt sie zu duplizieren. Zeilen ohne Preis werden
+übersprungen. Fehler beim Historien-Schreiben (z. B. fehlende Tabelle) geben
+nur eine Warnung aus — der eigentliche Offers-Push schlägt dadurch nie fehl.
+
+**Manuelle Migration:** `supabase/migration_v7_price_history.sql` einmalig im
+Supabase-SQL-Editor ausführen. Bis dahin läuft jeder Push zwar erfolgreich
+durch, meldet aber `WARNUNG: Preis-Historie fehlgeschlagen`.
+
 ## Dokumentation
 
 - [docs/rewe-cert.md](docs/rewe-cert.md) — Rewe-TLS-Zertifikat einrichten
