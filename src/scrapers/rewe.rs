@@ -73,7 +73,7 @@ fn check_certs(cert: &str, key: &str) -> Result<()> {
     Ok(())
 }
 
-fn parse_offers(raw: serde_json::Value, market_id: &str) -> Result<Vec<Offer>> {
+pub fn parse_offers(raw: serde_json::Value, market_id: &str) -> Result<Vec<Offer>> {
     let mut offers = Vec::new();
 
     // rewerse returns: { "current": { "fromDate", "untilDate", "categories": [...] }, "next": {...} }
