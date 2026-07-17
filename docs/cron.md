@@ -1,8 +1,14 @@
 # smartshop automatisieren: Cron, launchd und die JSON-API
 
+> **macOS-Nutzer:** Der empfohlene Weg ist der fertige launchd-Agent —
+> Einrichtung in [automation.md](automation.md). Diese Seite beschreibt die
+> Cron-Variante und die JSON-API.
+
 Zwei Bausteine bieten sich für Automatisierung an:
 
-1. `scripts/fetch-all.sh` — holt regelmäßig die Angebote aller Ketten.
+1. `scripts/nightly.sh` — nächtliche Pipeline: Angebote aller Ketten
+   abrufen, nach Supabase pushen, Watchlist prüfen (Konfiguration über
+   `~/.config/smartshop/env`, siehe `scripts/env.example`).
 2. `smartshop watch check` — meldet Watchlist-Treffer per **Exit-Code 1**
    (0 = keine Treffer), ideal als Cron-Bedingung für Benachrichtigungen.
 
@@ -16,16 +22,17 @@ Zwei Bausteine bieten sich für Automatisierung an:
 
 Hinweis zum Fehlerverhalten: `fetch --all-stores` bricht bei einzelnen
 Ketten-Fehlern **nicht** ab und endet mit Exit-Code 0, solange der Lauf als
-Ganzes funktioniert. Das Log (`SMARTSHOP_LOG`) enthält die Zusammenfassung
-pro Kette.
+Ganzes funktioniert. Das Lauf-Log (unter `~/Library/Logs/smartshop/`)
+enthält die Zusammenfassung pro Kette.
 
 ## Crontab (Linux/macOS)
 
 `crontab -e`, dann z. B. täglicher Abruf um 6:30 und Watchlist-Check um 7:00:
 
 ```cron
-# Angebote aller Ketten abrufen (Pfade anpassen)
-30 6 * * * SMARTSHOP_ZIP=50667 SMARTSHOP_BIN=/usr/local/bin/smartshop /pfad/zu/smartshop/scripts/fetch-all.sh
+# Komplette Pipeline (fetch + push + watch check); Konfiguration liest das
+# Skript aus ~/.config/smartshop/env
+30 6 * * * /pfad/zu/smartshop/scripts/nightly.sh
 
 # Watchlist prüfen: Exit-Code 1 bei Treffern -> Benachrichtigung schicken
 0 7 * * * /usr/local/bin/smartshop watch check --db "$HOME/.local/share/smartshop/smartshop.db" > /tmp/smartshop-watch.txt || mail -s "smartshop: neue Deals" ich@example.com < /tmp/smartshop-watch.txt
@@ -41,55 +48,22 @@ oder ein `curl`-POST an ntfy/Slack:
 0 7 * * * smartshop watch check --db /pfad/smartshop.db > /tmp/w.txt || curl -s -d @/tmp/w.txt ntfy.sh/mein-smartshop-topic
 ```
 
-Alternativ direkt beim Abruf: `fetch --notify` (in fetch-all.sh bereits
-gesetzt) druckt die Watchlist-Treffer ans Ende des Fetch-Logs — ändert aber
-nichts am Exit-Code.
+Alternativ übernimmt `nightly.sh` das bereits: mit gesetztem `NTFY_TOPIC`
+in `~/.config/smartshop/env` benachrichtigt es nach dem Push automatisch
+bei Watchlist-Treffern und Fehlläufen.
 
 ## launchd (macOS)
 
 Cron funktioniert auch auf macOS, launchd ist aber der native Weg und holt
-verpasste Läufe nach dem Aufwachen nach. Datei
-`~/Library/LaunchAgents/de.smartshop.fetch-all.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>de.smartshop.fetch-all</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/pfad/zu/smartshop/scripts/fetch-all.sh</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>SMARTSHOP_ZIP</key><string>50667</string>
-        <key>SMARTSHOP_BIN</key><string>/usr/local/bin/smartshop</string>
-        <key>PATH</key><string>/usr/local/bin:/usr/bin:/bin</string>
-    </dict>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key><integer>6</integer>
-        <key>Minute</key><integer>30</integer>
-    </dict>
-    <key>StandardErrorPath</key>
-    <string>/tmp/smartshop-fetch-all.err</string>
-</dict>
-</plist>
-```
-
-Aktivieren / testen / deaktivieren:
+verpasste Läufe nach dem Aufwachen nach. Der fertige Agent
+(`de.smartshop.nightly`, täglich 06:30) liegt in `scripts/` und wird mit
 
 ```sh
-launchctl load ~/Library/LaunchAgents/de.smartshop.fetch-all.plist
-launchctl start de.smartshop.fetch-all
-launchctl unload ~/Library/LaunchAgents/de.smartshop.fetch-all.plist
+scripts/install-launchd.sh
 ```
 
-Für den Watch-Check analog ein zweites plist anlegen, dessen
-`ProgramArguments` ein kleines `bash -c`-Kommando mit dem
-`watch check || notifier`-Muster enthält.
+installiert — komplette Anleitung inklusive Logs, Benachrichtigungen und
+Deinstallation in [automation.md](automation.md).
 
 ## JSON-API für Dashboards
 
