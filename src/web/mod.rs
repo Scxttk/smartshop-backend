@@ -5,10 +5,10 @@ mod html;
 
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::{Form, Query, State};
 use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::routing::{get, post};
 use axum::Router;
 use serde::Deserialize;
 
@@ -25,7 +25,6 @@ struct WebState {
 type SharedState = State<Arc<WebState>>;
 
 enum WebError {
-    #[allow(dead_code)] // wird von den Formular-Seiten (Watchlist) verwendet
     BadRequest(String),
     Internal(anyhow::Error),
 }
@@ -54,6 +53,9 @@ pub fn router(db_path: String) -> Router {
         .route("/", get(overview))
         .route("/search", get(search))
         .route("/compare", get(compare))
+        .route("/watchlist", get(watchlist))
+        .route("/watchlist/add", post(watchlist_add))
+        .route("/watchlist/remove", post(watchlist_remove))
         .with_state(Arc::new(WebState { db_path }))
 }
 
@@ -269,4 +271,114 @@ async fn compare(
         }
     }
     Ok(Html(page("Vergleich", &body)))
+}
+
+// ---------- /watchlist ----------
+
+async fn watchlist(State(state): SharedState) -> Result<Html<String>, WebError> {
+    let conn = db::open(&state.db_path)?;
+    let watches = db::watches(&conn)?;
+    let names = market_names(&conn)?;
+
+    let mut body = String::from(
+        "<h2>Neue Beobachtung</h2>\
+<form method=\"post\" action=\"/watchlist/add\">\
+<label>Suchbegriff <input type=\"text\" name=\"query\" required></label> \
+<label>Max-Preis (€) <input type=\"number\" name=\"max_price\" step=\"0.01\" min=\"0\"></label> \
+<button type=\"submit\">Anlegen</button></form>",
+    );
+
+    if watches.is_empty() {
+        body.push_str("<p class=\"hinweis\">Keine Beobachtungen angelegt.</p>");
+    } else {
+        body.push_str("<h2>Beobachtungen</h2>");
+        let rows: Vec<Vec<String>> = watches
+            .iter()
+            .map(|w| {
+                let hits = db::watch_hits(&conn, w).map(|h| h.len()).unwrap_or(0);
+                vec![
+                    format!("#{}", w.id),
+                    format!(
+                        "<a href=\"/search?q={}\">{}</a>",
+                        urlencode(&w.query),
+                        escape(&w.query)
+                    ),
+                    w.max_price.map(|p| format!("bis {p:.2} €")).unwrap_or_else(|| "–".into()),
+                    format!("{hits}"),
+                    escape(&w.created_at),
+                    format!(
+                        "<form class=\"inline\" method=\"post\" action=\"/watchlist/remove\">\
+<input type=\"hidden\" name=\"id\" value=\"{}\">\
+<button type=\"submit\">Entfernen</button></form>",
+                        w.id
+                    ),
+                ]
+            })
+            .collect();
+        body.push_str(&table(
+            &["ID", "Suchbegriff", ">Max-Preis", ">Treffer", "Angelegt am", ""],
+            &rows,
+        ));
+
+        // Aktuelle Treffer wie bei `watch check`
+        for w in &watches {
+            let hits = db::watch_hits(&conn, w)?;
+            if hits.is_empty() {
+                continue;
+            }
+            body.push_str(&format!("<h2>Treffer für '{}'</h2>", escape(&w.query)));
+            let rows: Vec<Vec<String>> = hits
+                .iter()
+                .map(|o| {
+                    vec![
+                        escape(names.get(&o.market_id).unwrap_or(&o.market_id)),
+                        escape(&display_name(o)),
+                        price(o.price),
+                    ]
+                })
+                .collect();
+            body.push_str(&table(&["Markt", "Produkt", ">Preis"], &rows));
+        }
+    }
+    Ok(Html(page("Watchlist", &body)))
+}
+
+#[derive(Deserialize)]
+struct AddWatchForm {
+    query: String,
+    max_price: Option<String>,
+}
+
+async fn watchlist_add(
+    State(state): SharedState,
+    Form(form): Form<AddWatchForm>,
+) -> Result<Redirect, WebError> {
+    let query = form.query.trim();
+    if query.is_empty() {
+        return Err(WebError::BadRequest("Feld 'query' fehlt oder ist leer.".to_string()));
+    }
+    // Leeres Zahlenfeld kommt als "" an, daher manuell parsen
+    let max_price = match form.max_price.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(s) => Some(s.replace(',', ".").parse::<f64>().map_err(|_| {
+            WebError::BadRequest("Feld 'max_price' muss eine Zahl sein.".to_string())
+        })?),
+    };
+    let conn = db::open(&state.db_path)?;
+    db::add_watch(&conn, query, max_price)?;
+    Ok(Redirect::to("/watchlist"))
+}
+
+#[derive(Deserialize)]
+struct RemoveWatchForm {
+    id: i64,
+}
+
+async fn watchlist_remove(
+    State(state): SharedState,
+    Form(form): Form<RemoveWatchForm>,
+) -> Result<Redirect, WebError> {
+    let conn = db::open(&state.db_path)?;
+    db::remove_watch(&conn, form.id)?;
+    Ok(Redirect::to("/watchlist"))
 }
