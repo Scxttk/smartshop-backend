@@ -149,6 +149,41 @@ pub fn dedupe_rows(rows: Vec<SupabaseRow>) -> Vec<SupabaseRow> {
         .collect()
 }
 
+/// Zeile für `public.price_history` (migration_v7): nur die Preis-relevanten
+/// Spalten einer SupabaseRow; `recorded_at` setzt die Datenbank.
+#[derive(Debug, Serialize)]
+struct HistoryRow<'a> {
+    market: &'a str,
+    product: &'a str,
+    region: Option<&'a str>,
+    price: f64,
+    regular_price: Option<f64>,
+    base_price: Option<f64>,
+    base_unit: Option<&'a str>,
+    unit: &'a str,
+    category: Option<&'a str>,
+    valid_from: Option<&'a str>,
+    valid_until: Option<&'a str>,
+}
+
+impl<'a> From<&'a SupabaseRow> for HistoryRow<'a> {
+    fn from(r: &'a SupabaseRow) -> Self {
+        HistoryRow {
+            market: &r.market,
+            product: &r.product,
+            region: r.region.as_deref(),
+            price: r.price,
+            regular_price: r.regular_price,
+            base_price: r.base_price,
+            base_unit: r.base_unit.as_deref(),
+            unit: &r.unit,
+            category: r.category.as_deref(),
+            valid_from: r.valid_from.as_deref(),
+            valid_until: r.valid_until.as_deref(),
+        }
+    }
+}
+
 pub struct PushConfig {
     pub base_url: String,
     pub api_key: String,
@@ -236,6 +271,31 @@ fn check_response(what: &str, resp: reqwest::blocking::Response) -> Result<()> {
     bail!("{what} fehlgeschlagen (HTTP {status}): {excerpt}");
 }
 
+/// Alle gepushten Zeilen zusätzlich in `public.price_history` upserten
+/// (Wochen-Schnappschuss für Preisverlaufs-Charts). Zeilen ohne Preis kommen
+/// hier nie an — map_offer filtert sie bereits. Liefert die Zeilenzahl.
+fn push_history(
+    client: &reqwest::blocking::Client,
+    cfg: &PushConfig,
+    rows: &[&SupabaseRow],
+) -> Result<usize> {
+    let url = format!("{}/rest/v1/price_history", cfg.base_url);
+    for batch in rows.chunks(BATCH_SIZE) {
+        let payload: Vec<HistoryRow> = batch.iter().map(|r| HistoryRow::from(*r)).collect();
+        let resp = client
+            .post(&url)
+            .header("apikey", &cfg.api_key)
+            .header("Authorization", format!("Bearer {}", cfg.api_key))
+            .query(&[("on_conflict", "market,product,region,valid_from")])
+            .header("Prefer", "resolution=merge-duplicates")
+            .json(&payload)
+            .send()
+            .with_context(|| format!("Supabase nicht erreichbar ({})", cfg.base_url))?;
+        check_response(&format!("Preis-Historie: Upsert von {} Zeilen", payload.len()), resp)?;
+    }
+    Ok(rows.len())
+}
+
 pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
     let groups = load_grouped(opts)?;
     if groups.is_empty() {
@@ -293,6 +353,16 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
         }
         total += rows.len();
         println!("  [{chain}] {} Angebote hochgeladen ({skipped} ohne Preis übersprungen).", rows.len());
+    }
+
+    // Preis-Historie best-effort mitschreiben: Fehler (z. B. Tabelle noch
+    // nicht migriert) warnen nur und lassen den Offers-Push erfolgreich.
+    let history_rows: Vec<&SupabaseRow> = groups.values().flat_map(|(r, _)| r).collect();
+    if !history_rows.is_empty() {
+        match push_history(&client, cfg, &history_rows) {
+            Ok(n) => println!("Preis-Historie: {n} Zeilen upsertet."),
+            Err(e) => eprintln!("WARNUNG: Preis-Historie fehlgeschlagen: {e:#}"),
+        }
     }
 
     // Region-Cache aktualisieren: diese PLZ wurde soeben gesynct.
