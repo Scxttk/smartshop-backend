@@ -85,6 +85,26 @@ select vault.update_secret(
 — oder einfacher: Secret im Dashboard unter „Vault" aktualisieren.
 Die Migration muss dafür nicht neu laufen.
 
+## Produktbilder: einmalige Migrationen v5 + v6
+
+Der Push schreibt seit v5 pro Angebot eine Produktbild-URL und spiegelt die
+Bilder seit v6 in einen eigenen Storage-Bucket. Beide Migrationen **einmal
+manuell im Supabase SQL-Editor ausführen** (idempotent):
+
+1. [`supabase/migration_v5_image_url.sql`](../supabase/migration_v5_image_url.sql)
+   — Spalte `offers.image_url` (optional; das Emoji bleibt Fallback).
+2. [`supabase/migration_v6_storage_bucket.sql`](../supabase/migration_v6_storage_bucket.sql)
+   — öffentlicher Bucket `offer-images` + Public-Read-Policy. Schreiben
+   läuft über den Service-Role-Key (umgeht Storage-RLS), es ist keine
+   Insert-Policy nötig.
+
+Danach zeigt `image_url` auf
+`…/storage/v1/object/public/offer-images/<sha256>.<ext>` statt auf das
+Händler-CDN. Läuft der Push, bevor v6 ausgeführt wurde, schlagen nur die
+Bild-Uploads fehl (Zeile behält die Händler-URL, Log zählt
+„fehlgeschlagen") — der Push selbst geht durch. Spiegelung abschalten:
+`push --no-mirror-images`.
+
 ## Zeitplan
 
 Der Nightly-Lauf startet per Cron um **04:30 UTC**:
