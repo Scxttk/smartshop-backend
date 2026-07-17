@@ -5,6 +5,54 @@
 
 use smartshop::scrapers;
 
+// ---------------------------------------------------------------- Kaufland
+
+#[test]
+fn kaufland_fixture_parses_sections_and_tiles() {
+    let offers =
+        scrapers::kaufland::parse_offers(include_str!("fixtures/kaufland/uebersicht.html"), "DE7380")
+            .unwrap();
+    assert_eq!(offers.len(), 9);
+
+    let lachs = &offers[0];
+    assert_eq!(lachs.title, "K-BLUE BAY");
+    assert_eq!(lachs.subtitle.as_deref(), Some("Lachsforellenfilet"));
+    assert_eq!(lachs.price, Some(3.19));
+    assert_eq!(lachs.regular_price, Some(3.79));
+    assert_eq!(lachs.category.as_deref(), Some("Fisch"));
+    assert_eq!(lachs.valid_from.as_deref(), Some("2026-07-16"));
+    assert_eq!(lachs.valid_until.as_deref(), Some("2026-07-22"));
+}
+
+// Regression: Kaufland-Titel sind Marken, das Produkt steht im Untertitel —
+// die Offer-ID muss den Untertitel enthalten, sonst kollidieren alle
+// Angebote einer Marke (Fix vom 2026-07, Commit 7b695e2).
+#[test]
+fn kaufland_offer_ids_include_subtitle() {
+    let offers =
+        scrapers::kaufland::parse_offers(include_str!("fixtures/kaufland/uebersicht.html"), "DE7380")
+            .unwrap();
+
+    let bay: Vec<_> = offers.iter().filter(|o| o.title == "K-BLUE BAY").collect();
+    assert_eq!(bay.len(), 2);
+    assert_ne!(bay[0].id, bay[1].id, "gleiche Marke, anderes Produkt -> andere ID");
+}
+
+// Quirk: dasselbe Angebot erscheint in der Warengruppe UND in "Unsere
+// Knüller". Beide Vorkommen teilen dieselbe ID (Dedup passiert beim
+// DB-Upsert, nicht im Parser).
+#[test]
+fn kaufland_duplicate_listing_across_categories_shares_id() {
+    let offers =
+        scrapers::kaufland::parse_offers(include_str!("fixtures/kaufland/uebersicht.html"), "DE7380")
+            .unwrap();
+
+    let bauer: Vec<_> = offers.iter().filter(|o| o.title == "BAUER").collect();
+    assert_eq!(bauer.len(), 2, "Duplikat aus zwei Kategorien erwartet");
+    assert_eq!(bauer[0].id, bauer[1].id);
+    assert_ne!(bauer[0].category, bauer[1].category);
+}
+
 // ---------------------------------------------------------------- EDEKA
 
 #[test]
