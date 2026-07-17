@@ -1,0 +1,56 @@
+{
+  "_comment": "Handgebaute Minimal-Antwort im Format des rewerse-CLI (discounts -json). Kein Live-Mitschnitt, da rewerse das REWE-Client-Zertifikat braucht. Struktur laut src/scrapers/rewe.rs::parse_offers.",
+  "current": {
+    "fromDate": "2026-07-13",
+    "untilDate": "2026-07-18",
+    "categories": [
+      {
+        "title": "Obst & Gemüse",
+        "offers": [
+          {
+            "title": "Wassermelone",
+            "subtitle": "je 1 kg",
+            "priceData": { "price": 0.99, "regularPrice": 1.49 },
+            "images": ["https://img.rewe.example/wassermelone.png"],
+            "rawValues": { "categoryTitle": "Obst & Gemüse", "flyerPage": 1 }
+          },
+          {
+            "title": "Bio Heidelbeeren",
+            "subtitle": "je 300-g-Schale",
+            "overline": "REWE Bio",
+            "priceData": { "price": "2,49" },
+            "detail": { "nutriScore": "A" },
+            "rawValues": { "categoryTitle": "Obst & Gemüse", "flyerPage": 1 }
+          }
+        ]
+      },
+      {
+        "title": "Drogerie",
+        "offers": [
+          {
+            "title": "Insektenspray",
+            "biozid": true,
+            "priceData": { "price": 3.99, "regularPrice": "5,49" },
+            "rawValues": { "categoryTitle": "Drogerie", "flyerPage": 12 }
+          }
+        ]
+      }
+    ]
+  },
+  "next": {
+    "fromDate": "2026-07-20",
+    "untilDate": "2026-07-25",
+    "categories": [
+      {
+        "title": "Molkereiprodukte",
+        "offers": [
+          {
+            "title": "Landliebe Joghurt",
+            "subtitle": "je 450-g-Becher",
+            "priceData": { "price": 0.79, "regularPrice": 1.19 }
+          }
+        ]
+      }
+    ]
+  }
+}

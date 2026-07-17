@@ -21,11 +21,14 @@ pub fn find_market(zip: &str, cert: &str, key: &str) -> Result<Market> {
         .context("rewerse CLI nicht gefunden — bitte installieren (siehe README)")?;
 
     if !output.status.success() {
-        bail!("rewerse markets search fehlgeschlagen:\n{}", String::from_utf8_lossy(&output.stderr));
+        bail!(
+            "[REWE] Markt-Lookup fehlgeschlagen (rewerse markets search -query {zip}):\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     let raw: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .context("rewerse markets JSON parse fehlgeschlagen")?;
+        .context("[REWE] Markt-Lookup JSON parsen fehlgeschlagen (rewerse markets search)")?;
 
     let markets = raw
         .as_array()
@@ -54,11 +57,15 @@ pub fn fetch_offers(market: &Market, cert: &str, key: &str) -> Result<Vec<Offer>
         .context("rewerse CLI nicht gefunden")?;
 
     if !output.status.success() {
-        bail!("rewerse discounts fehlgeschlagen:\n{}", String::from_utf8_lossy(&output.stderr));
+        bail!(
+            "[REWE] Angebote laden fehlgeschlagen (rewerse discounts -market {}):\n{}",
+            market.id,
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     let raw: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .context("rewerse discounts JSON parse fehlgeschlagen")?;
+        .context("[REWE] Angebote JSON parsen fehlgeschlagen (rewerse discounts)")?;
 
     parse_offers(raw, &market.id)
 }
@@ -73,7 +80,7 @@ fn check_certs(cert: &str, key: &str) -> Result<()> {
     Ok(())
 }
 
-fn parse_offers(raw: serde_json::Value, market_id: &str) -> Result<Vec<Offer>> {
+pub fn parse_offers(raw: serde_json::Value, market_id: &str) -> Result<Vec<Offer>> {
     let mut offers = Vec::new();
 
     // rewerse returns: { "current": { "fromDate", "untilDate", "categories": [...] }, "next": {...} }

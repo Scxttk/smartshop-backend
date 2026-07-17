@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 
 use crate::models::{Market, Offer};
+use crate::scrapers::util;
 
 // Penny-Angebote über die öffentlichen JSON-Endpoints von penny.de.
 // Kein Client-Zertifikat nötig, nur ein Browser-User-Agent.
@@ -12,7 +13,6 @@ use crate::models::{Market, Offer};
 //             -> { "offerTiles": [...] }
 
 const BASE_URL: &str = "https://www.penny.de";
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36";
 
 pub fn find_market(zip: &str) -> Result<Market> {
     block_on(async {
@@ -57,14 +57,16 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
             .map(String::from);
 
         // Kategorien und Wochen stehen im HTML der Angebotsseite
+        let angebote_url = format!("{BASE_URL}/angebote");
+        util::polite_pause(&angebote_url);
         let html = client
-            .get(format!("{BASE_URL}/angebote"))
+            .get(&angebote_url)
             .send()
             .await
-            .context("Penny-Angebotsseite-Request fehlgeschlagen")?
+            .with_context(|| util::ctx("Penny", "Angebotsseite laden", &angebote_url))?
             .text()
             .await
-            .context("Penny-Angebotsseite konnte nicht gelesen werden")?;
+            .with_context(|| util::ctx("Penny", "Angebotsseite lesen", &angebote_url))?;
 
         let categories = extract_attr_values(&html, "data-category-name");
         if categories.is_empty() {
@@ -90,11 +92,12 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
                     url.push_str(&format!("?region={r}"));
                 }
 
+                util::polite_pause(&url);
                 let resp = client
                     .get(&url)
                     .send()
                     .await
-                    .with_context(|| format!("Penny-Angebote-Request fehlgeschlagen: {url}"))?;
+                    .with_context(|| util::ctx("Penny", "Angebote laden", &url))?;
 
                 // Nicht jede Kategorie existiert in jeder Region/Woche
                 if !resp.status().is_success() {
@@ -106,64 +109,15 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
                     Err(_) => continue,
                 };
 
-                let tiles = raw
-                    .get("offerTiles")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-
-                for tile in &tiles {
-                    let Some(title) = tile.get("title").and_then(|v| v.as_str()) else { continue };
-                    let title = title.to_string();
-
-                    // Kategorien überschneiden sich (z. B. top-angebote vs. food)
-                    if !seen.insert(title.to_lowercase()) {
-                        continue;
-                    }
-
-                    let subtitle = tile.get("quantity").and_then(|v| v.as_str()).map(String::from);
-                    let overline = tile
-                        .get("headline")
-                        .or_else(|| tile.get("actionMarker"))
-                        .and_then(|v| v.as_str())
-                        .map(String::from);
-
-                    let price = tile.get("price").and_then(json_price);
-                    let regular_price = tile
-                        .get("listPrice")
-                        .and_then(json_price)
-                        .or_else(|| tile.get("crossOutPrice").and_then(json_price))
-                        .or_else(|| tile.get("originalPrice").and_then(json_price));
-
-                    let images: Vec<String> = tile
-                        .get("imageRendition")
-                        .and_then(|r| {
-                            ["tileLg", "tileMd", "tileSm", "tileXs"]
-                                .iter()
-                                .find_map(|k| r.get(k).and_then(|v| v.as_str()))
-                        })
-                        .map(|s| vec![s.to_string()])
-                        .unwrap_or_default();
-
-                    let id = Offer::build_id(&market.id, &title, Some(&valid_from));
-
-                    offers.push(Offer {
-                        id,
-                        market_id: market.id.clone(),
-                        title,
-                        subtitle,
-                        overline,
-                        price,
-                        regular_price,
-                        category: Some(category.clone()),
-                        nutri_score: None,
-                        valid_from: Some(valid_from.clone()),
-                        valid_until: Some(valid_until.clone()),
-                        images,
-                        biozid: false,
-                        flyer_page: None,
-                    });
-                }
+                parse_offer_tiles(
+                    &raw,
+                    &market.id,
+                    category,
+                    &valid_from,
+                    &valid_until,
+                    &mut seen,
+                    &mut offers,
+                );
             }
         }
 
@@ -171,28 +125,99 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
     })
 }
 
+// Alle offerTiles einer Kategorie-Antwort in Offers übersetzen.
+// `seen` dedupliziert nach Titel über Kategorien hinweg (top-angebote
+// überschneidet sich mit den Themen-Kategorien).
+pub fn parse_offer_tiles(
+    raw: &serde_json::Value,
+    market_id: &str,
+    category: &str,
+    valid_from: &str,
+    valid_until: &str,
+    seen: &mut HashSet<String>,
+    offers: &mut Vec<Offer>,
+) {
+    let tiles = raw
+        .get("offerTiles")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    for tile in &tiles {
+        let Some(title) = tile.get("title").and_then(|v| v.as_str()) else { continue };
+        let title = title.to_string();
+
+        // Kategorien überschneiden sich (z. B. top-angebote vs. food)
+        if !seen.insert(title.to_lowercase()) {
+            continue;
+        }
+
+        let subtitle = tile.get("quantity").and_then(|v| v.as_str()).map(String::from);
+        let overline = tile
+            .get("headline")
+            .or_else(|| tile.get("actionMarker"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        let price = tile.get("price").and_then(json_price);
+        let regular_price = tile
+            .get("listPrice")
+            .and_then(json_price)
+            .or_else(|| tile.get("crossOutPrice").and_then(json_price))
+            .or_else(|| tile.get("originalPrice").and_then(json_price));
+
+        let images: Vec<String> = tile
+            .get("imageRendition")
+            .and_then(|r| {
+                ["tileLg", "tileMd", "tileSm", "tileXs"]
+                    .iter()
+                    .find_map(|k| r.get(k).and_then(|v| v.as_str()))
+            })
+            .map(|s| vec![s.to_string()])
+            .unwrap_or_default();
+
+        let id = Offer::build_id(market_id, &title, Some(valid_from));
+
+        offers.push(Offer {
+            id,
+            market_id: market_id.to_string(),
+            title,
+            subtitle,
+            overline,
+            price,
+            regular_price,
+            category: Some(category.to_string()),
+            nutri_score: None,
+            valid_from: Some(valid_from.to_string()),
+            valid_until: Some(valid_until.to_string()),
+            images,
+            biozid: false,
+            flyer_page: None,
+        });
+    }
+}
+
 fn build_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .context("HTTP-Client konnte nicht erstellt werden")
+    util::async_client()
 }
 
 async fn fetch_markets(client: &reqwest::Client) -> Result<Vec<serde_json::Value>> {
+    let url = format!("{BASE_URL}/.rest/market");
+    util::polite_pause(&url);
     let resp = client
-        .get(format!("{BASE_URL}/.rest/market"))
+        .get(&url)
         .send()
         .await
-        .context("Penny-Marktliste-Request fehlgeschlagen")?;
+        .with_context(|| util::ctx("Penny", "Markt-Lookup", &url))?;
 
     if !resp.status().is_success() {
-        bail!("Penny-Marktliste lieferte HTTP {}", resp.status());
+        bail!("[Penny] Markt-Lookup lieferte HTTP {}: {url}", resp.status());
     }
 
     let raw: serde_json::Value = resp
         .json()
         .await
-        .context("Penny-Marktliste JSON parse fehlgeschlagen")?;
+        .with_context(|| util::ctx("Penny", "Markt-Lookup JSON parsen", &url))?;
 
     raw.as_array()
         .cloned()
@@ -274,9 +299,11 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 mod tests {
     use super::*;
 
+    /// Live-Test gegen penny.de: cargo test penny -- --ignored --nocapture
     #[test]
+    #[ignore = "Live-Test gegen penny.de"]
     fn live_fetch_offers_for_example_zip() {
-        let market = find_market("10115").expect("Markt für 10115");
+        let market = find_market("01219").expect("Markt für 01219");
         println!("Markt: {} ({})", market.name, market.id);
 
         let offers = fetch_offers(&market).expect("Angebote");

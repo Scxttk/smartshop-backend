@@ -3,7 +3,7 @@ use scraper::{ElementRef, Html, Selector};
 use std::collections::HashSet;
 
 use crate::models::{Market, Offer};
-use crate::scrapers::util::{curl_get, curl_redirect_url};
+use crate::scrapers::util::{self, curl_get, curl_redirect_url};
 
 // EDEKA über edeka.de (regionale Angebote, Markt über PLZ wie bei Rewe).
 //
@@ -37,10 +37,11 @@ pub fn find_market(zip: &str) -> Result<Market> {
             ("Sec-Fetch-Mode", "cors"),
             ("Sec-Fetch-Dest", "empty"),
         ],
-    )?;
+    )
+    .with_context(|| util::ctx("EDEKA", "Markt-Lookup", &url))?;
 
-    let raw: serde_json::Value =
-        serde_json::from_str(&body).context("EDEKA-Marktsuche JSON parse fehlgeschlagen")?;
+    let raw: serde_json::Value = serde_json::from_str(&body)
+        .with_context(|| util::ctx("EDEKA", "Markt-Lookup JSON parsen", &url))?;
     let market = raw
         .get("markets")
         .and_then(|v| v.as_array())
@@ -68,7 +69,8 @@ pub fn find_market(zip: &str) -> Result<Market> {
             ("Sec-Fetch-User", "?1"),
             ("Upgrade-Insecure-Requests", "1"),
         ],
-    )?;
+    )
+    .with_context(|| util::ctx("EDEKA", "Markt-Redirect auflösen", legacy_url))?;
     let id = target
         .split("/maerkte/")
         .nth(1)
@@ -91,16 +93,22 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
             ("Sec-Fetch-User", "?1"),
             ("Upgrade-Insecure-Requests", "1"),
         ],
-    )?;
+    )
+    .with_context(|| util::ctx("EDEKA", "Angebote laden", &url))?;
 
-    let offers = parse_offers(&html, &market.id)?;
+    let offers = parse_offers(&html, &market.id)
+        .with_context(|| util::ctx("EDEKA", "Angebote parsen", &url))?;
     if offers.is_empty() {
-        bail!("Keine EDEKA-Angebote gefunden — Seitenstruktur hat sich möglicherweise geändert");
+        bail!("[EDEKA] Keine Angebote gefunden ({url}) — Seitenstruktur hat sich möglicherweise geändert");
     }
     Ok(offers)
 }
 
-fn parse_offers(html: &str, market_id: &str) -> Result<Vec<Offer>> {
+// NULL-Preise sind hier echt: "Tagespreis"-Kacheln und reine
+// PAYBACK-Extra-Punkte-Kacheln tragen weder in der Kachel noch im
+// zugehörigen Dialog einen Preis (~20-25 Angebote pro Woche, verifiziert
+// 2026-07 am Roh-HTML). Sie werden bewusst mit price = None übernommen.
+pub fn parse_offers(html: &str, market_id: &str) -> Result<Vec<Offer>> {
     let doc = Html::parse_document(html);
     let sel_article = sel("article");
     // Highlight-Kacheln nutzen h2, normale Kacheln h4 (vereinzelt h3);
@@ -234,7 +242,7 @@ mod tests {
     #[test]
     #[ignore = "Live-Test gegen edeka.de"]
     fn live_fetch_offers() {
-        let market = find_market("48683").expect("Markt");
+        let market = find_market("01219").expect("Markt");
         println!("Markt: {} ({})", market.name, market.id);
 
         let offers = fetch_offers(&market).expect("Angebote");
