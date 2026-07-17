@@ -12,6 +12,7 @@ create table if not exists public.offers (
     unit          text             default 'Stück',
     category      text,
     emoji         text,
+    image_url     text,
     valid_from    date,
     valid_until   date,
     created_at    timestamptz      default now(),
