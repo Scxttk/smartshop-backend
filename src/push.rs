@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::models::{Market, Offer};
-use crate::{db, units};
+use crate::{db, enrich, units};
 
 pub const BATCH_SIZE: usize = 100;
 
@@ -103,6 +103,8 @@ fn is_pure_quantity(text: &str) -> bool {
 /// Preis — die kann die App nicht anzeigen.
 pub fn map_offer(offer: &Offer, chain: &str, region: Option<&str>) -> Option<SupabaseRow> {
     let price = offer.price?;
+    let enriched =
+        enrich::enrich(&offer.title, offer.subtitle.as_deref(), offer.category.as_deref());
     let unit_price = units::derive_unit_price(
         offer.price,
         &[offer.subtitle.as_deref(), offer.overline.as_deref(), Some(&offer.title)],
@@ -118,8 +120,8 @@ pub fn map_offer(offer: &Offer, chain: &str, region: Option<&str>) -> Option<Sup
             Some(s) if !s.is_empty() && is_pure_quantity(s) => s.clone(),
             _ => "Stück".to_string(),
         },
-        category: offer.category.clone(),
-        emoji: None,
+        category: Some(enriched.category.to_string()),
+        emoji: Some(enriched.emoji.to_string()),
         valid_from: offer.valid_from.clone(),
         valid_until: offer.valid_until.clone(),
         base_price: unit_price.map(|up| (up.eur * 100.0).round() / 100.0),
