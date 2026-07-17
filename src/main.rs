@@ -19,6 +19,7 @@ enum Store {
     Rewe,
     Penny,
     Kaufland,
+    Lidl,
 }
 
 #[derive(Subcommand)]
@@ -126,6 +127,13 @@ fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db
             println!("Markt gefunden: {} (ID: {})", market.name, market.id);
             println!("Lade Angebote...");
             let offers = scrapers::kaufland::fetch_offers(&market)?;
+            (market, offers)
+        }
+        Store::Lidl => {
+            let market = scrapers::lidl::find_market(&zip)?;
+            println!("Markt: {} (ID: {})", market.name, market.id);
+            println!("Lade Angebote...");
+            let offers = scrapers::lidl::fetch_offers(&market)?;
             (market, offers)
         }
     };
