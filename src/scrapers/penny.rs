@@ -40,7 +40,9 @@ pub fn find_market(zip: &str) -> Result<Market> {
             .and_then(|v| v.as_str())
             .unwrap_or("PENNY");
 
-        Ok(Market { id: id.to_string(), name: name.to_string() })
+        // Koordinaten kommen als Strings ("53.03672"); fehlend/kaputt -> None.
+        let coord = |k: &str| market.get(k).and_then(|v| v.as_str()).and_then(|s| s.parse().ok());
+        Ok(Market::new(id, name).with_geo(coord("latitude"), coord("longitude")))
     })
 }
 

@@ -4,6 +4,24 @@ use serde::{Deserialize, Serialize};
 pub struct Market {
     pub id: String,
     pub name: String,
+    /// Filial-Koordinaten, wenn der Store-Finder sie liefert; nationale
+    /// Platzhalter und ältere Datenbestände tragen None.
+    #[serde(default)]
+    pub lat: Option<f64>,
+    #[serde(default)]
+    pub lon: Option<f64>,
+}
+
+impl Market {
+    pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
+        Market { id: id.into(), name: name.into(), lat: None, lon: None }
+    }
+
+    pub fn with_geo(mut self, lat: Option<f64>, lon: Option<f64>) -> Self {
+        self.lat = lat;
+        self.lon = lon;
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

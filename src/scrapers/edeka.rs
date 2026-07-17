@@ -78,7 +78,7 @@ pub fn find_market(zip: &str) -> Result<Market> {
         .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
         .with_context(|| format!("Unerwartetes Redirect-Ziel für EDEKA-Markt: {target}"))?;
 
-    Ok(Market { id: id.to_string(), name })
+    Ok(Market::new(id, name))
 }
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {

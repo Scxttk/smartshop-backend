@@ -25,8 +25,8 @@ fn offer(id: &str, market_id: &str, title: &str, subtitle: Option<&str>, overlin
 // Fixture-DB mit zwei Märkten und vergleichbaren Angeboten anlegen
 fn build_fixture(path: &std::path::Path) {
     let conn = db::open(path.to_str().unwrap()).expect("DB öffnen");
-    db::upsert_market(&conn, &Market { id: "M1".into(), name: "Testmarkt Eins".into() }).unwrap();
-    db::upsert_market(&conn, &Market { id: "M2".into(), name: "Testmarkt Zwei".into() }).unwrap();
+    db::upsert_market(&conn, &Market::new("M1", "Testmarkt Eins")).unwrap();
+    db::upsert_market(&conn, &Market::new("M2", "Testmarkt Zwei")).unwrap();
 
     // Gleiches Produkt in beiden Märkten, M2 billiger
     db::upsert_offer(&conn, &offer("o1", "M1", "MEGGLE Feine Butter", Some("je 250-g-Packg. (1 kg = 6.36)"), None, 1.59, Some(2.59))).unwrap();

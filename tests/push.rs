@@ -161,7 +161,7 @@ fn dedupe_on_conflict_key() {
 
 #[test]
 fn chain_detection_from_market() {
-    let m = |id: &str, name: &str| Market { id: id.to_string(), name: name.to_string() };
+    let m = |id: &str, name: &str| Market::new(id, name);
     assert_eq!(chain_for(&m("LIDL_DE", "Lidl Deutschland")), Some("Lidl"));
     // EDEKA-Vertriebsmarken ohne "edeka" im Namen (ID ist nur numerisch)
     assert_eq!(chain_for(&m("022745", "E center Peltzer")), Some("EDEKA"));
@@ -287,7 +287,7 @@ fn temp_db(name: &str) -> String {
 fn seed_db(path: &str, n: usize) {
     let _ = std::fs::remove_file(path);
     let conn = db::open(path).unwrap();
-    db::upsert_market(&conn, &Market { id: "m1".to_string(), name: "REWE Christian Koehler oHG".to_string() })
+    db::upsert_market(&conn, &Market::new("m1", "REWE Christian Koehler oHG"))
         .unwrap();
     for i in 0..n {
         db::upsert_offer(&conn, &offer(&format!("Produkt {i:03}"), Some(1.0 + i as f64 / 100.0)))
@@ -420,7 +420,7 @@ fn push_mirrors_images_and_caches_them() {
     // der Download klappt.
     let _ = std::fs::remove_file(&db_path);
     let conn = db::open(&db_path).unwrap();
-    db::upsert_market(&conn, &Market { id: "m1".to_string(), name: "REWE Christian Koehler oHG".to_string() })
+    db::upsert_market(&conn, &Market::new("m1", "REWE Christian Koehler oHG"))
         .unwrap();
     let mut o = offer("Gouda", Some(1.99));
     o.images = vec![format!("{base_url}/img/gouda.jpg")];

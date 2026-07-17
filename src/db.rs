@@ -240,7 +240,8 @@ pub fn upsert_market(conn: &Connection, market: &Market) -> Result<()> {
 pub fn markets(conn: &Connection) -> Result<Vec<Market>> {
     let mut stmt = conn.prepare("SELECT id, name FROM markets ORDER BY name")?;
     let rows = stmt.query_map([], |row| {
-        Ok(Market { id: row.get(0)?, name: row.get(1)? })
+        // Koordinaten liegen nur im Sync-Speicher, nicht in der lokalen DB.
+        Ok(Market { id: row.get(0)?, name: row.get(1)?, lat: None, lon: None })
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
