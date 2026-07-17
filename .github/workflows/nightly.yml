@@ -41,44 +41,76 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      # REWE läuft ohne Client-Zertifikat und schlägt pro Store fehl; das ist
-      # erwartet. fetch --all-stores bricht bei einzelnen Store-Fehlern nicht ab.
-      - name: Fetch offers (all stores)
-        run: |
-          set -o pipefail
-          ./target/release/smartshop fetch --all-stores \
-            --zip "$SMARTSHOP_ZIP" --db "$DB" 2>&1 | tee "$LOG"
-
-      - name: Store summary + zero-offer check
-        run: |
-          {
-            echo "## Nightly fetch (PLZ $SMARTSHOP_ZIP)"
-            echo ""
-            echo "| Markt | Filiale | Ergebnis |"
-            echo "|---|---|---|"
-            # "Zusammenfassung:"-Block aus dem fetch-Log in eine Markdown-Tabelle
-            # umformen (Spalten sind mit >=2 Leerzeichen getrennt).
-            sed -n '/^Zusammenfassung:/,$p' "$LOG" | tail -n +3 \
-              | sed -E 's/^ +//; s/ {2,}/ | /g; s/^/| /; s/$/ |/'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          COUNT=$(sqlite3 "$DB" 'SELECT COUNT(*) FROM offers')
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Angebote insgesamt: $COUNT**" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$COUNT" -eq 0 ]; then
-            echo "::error::Fetch hat 0 Angebote geliefert — alle Stores fehlgeschlagen (Akamai blockt evtl. Runner-IPs, siehe docs/ci.md)."
-            exit 1
-          fi
-          echo "$COUNT Angebote in der DB."
-
-      - name: Push to Supabase
+      # Primärpfad: alle aktiven Regionen aus public.regions syncen
+      # (fetch + markets-Upsert + push pro PLZ). REWE läuft ohne
+      # Client-Zertifikat und schlägt pro Store fehl; das ist erwartet.
+      # Schlägt der ganze Sync fehl (Tabelle leer/unerreichbar, alle
+      # Regionen gescheitert), greift der Fallback-Step unten.
+      - name: Sync regions (fetch+push per region)
+        id: sync
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
           set -o pipefail
+          if ./target/release/smartshop sync-regions --db "$DB" 2>&1 | tee "$LOG"; then
+            echo "sync_failed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "sync_failed=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::sync-regions fehlgeschlagen — Fallback auf Einzel-PLZ $SMARTSHOP_ZIP."
+          fi
+
+      # Bootstrap-Fallback: alter Einzel-PLZ-Pfad mit SMARTSHOP_ZIP, damit die
+      # Pipeline nie dunkel geht.
+      - name: Fallback fetch+push (single ZIP)
+        if: steps.sync.outputs.sync_failed == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          set -o pipefail
+          ./target/release/smartshop fetch --all-stores \
+            --zip "$SMARTSHOP_ZIP" --db "$DB" 2>&1 | tee -a "$LOG"
           ./target/release/smartshop push --region "$SMARTSHOP_ZIP" --db "$DB" \
             2>&1 | tee -a "$LOG"
+
+      - name: Store summary + zero-offer check
+        if: always()
+        run: |
+          {
+            echo "## Nightly sync"
+            # Jeden "Zusammenfassung"-Block aus dem Log (einer pro Region,
+            # bzw. "Zusammenfassung:" im Fallback) in eine Markdown-Tabelle
+            # umformen (Spalten sind mit >=2 Leerzeichen getrennt).
+            awk '
+              /^Zusammenfassung/ {
+                title=$0; sub(/:$/, "", title)
+                if (title == "Zusammenfassung") title = "Zusammenfassung (Fallback PLZ)"
+                print ""
+                print "### " title
+                print ""
+                print "| Markt | Filiale | Ergebnis |"
+                print "|---|---|---|"
+                inblk=1; header_skipped=0; next
+              }
+              inblk {
+                if ($0 !~ /^  /) { inblk=0; next }
+                if (!header_skipped) { header_skipped=1; next }
+                line=$0; sub(/^ +/, "", line); gsub(/ {2,}/, " | ", line)
+                print "| " line " |"
+              }
+            ' "$LOG"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          COUNT=0
+          [ -f "$DB" ] && COUNT=$(sqlite3 "$DB" 'SELECT COUNT(*) FROM offers')
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Angebote in der lokalen DB (letzte Region): $COUNT**" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::0 Angebote in der DB — alle Stores fehlgeschlagen (Akamai blockt evtl. Runner-IPs, siehe docs/ci.md)."
+            exit 1
+          fi
+          echo "$COUNT Angebote in der DB."
 
       - name: Upload run log
         if: always()
