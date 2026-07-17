@@ -100,7 +100,11 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
     Ok(offers)
 }
 
-fn parse_offers(html: &str, market_id: &str) -> Result<Vec<Offer>> {
+// NULL-Preise sind hier echt: "Tagespreis"-Kacheln und reine
+// PAYBACK-Extra-Punkte-Kacheln tragen weder in der Kachel noch im
+// zugehörigen Dialog einen Preis (~20-25 Angebote pro Woche, verifiziert
+// 2026-07 am Roh-HTML). Sie werden bewusst mit price = None übernommen.
+pub fn parse_offers(html: &str, market_id: &str) -> Result<Vec<Offer>> {
     let doc = Html::parse_document(html);
     let sel_article = sel("article");
     // Highlight-Kacheln nutzen h2, normale Kacheln h4 (vereinzelt h3);

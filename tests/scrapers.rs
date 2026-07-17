@@ -5,6 +5,44 @@
 
 use smartshop::scrapers;
 
+// ---------------------------------------------------------------- EDEKA
+
+#[test]
+fn edeka_fixture_parses_offers_and_dates() {
+    let offers =
+        scrapers::edeka::parse_offers(include_str!("fixtures/edeka/angebote.html"), "022745")
+            .unwrap();
+    assert_eq!(offers.len(), 6);
+
+    let blaubeeren = &offers[0];
+    assert_eq!(blaubeeren.title, "Kulturheidelbeeren");
+    assert_eq!(blaubeeren.price, Some(3.99));
+    assert_eq!(blaubeeren.valid_from.as_deref(), Some("2026-07-13"));
+    assert_eq!(blaubeeren.valid_until.as_deref(), Some("2026-07-18"));
+
+    // App-Preis wird wie ein Festpreis geparst
+    let butter = offers.iter().find(|o| o.title.starts_with("Meggle")).unwrap();
+    assert_eq!(butter.price, Some(0.99));
+}
+
+// EDEKA-NULL-Preise sind echt: "Tagespreis"-Kacheln und reine
+// PAYBACK-Punkte-Kacheln haben im HTML (Kachel + Dialog) keinen Preis.
+// Sie kommen bewusst mit price = None an — kein Parser-Bug.
+#[test]
+fn edeka_priceless_promo_tiles_stay_price_none() {
+    let offers =
+        scrapers::edeka::parse_offers(include_str!("fixtures/edeka/angebote.html"), "022745")
+            .unwrap();
+
+    let tagespreis = offers.iter().find(|o| o.title.contains("Grillkäse")).unwrap();
+    assert_eq!(tagespreis.price, None);
+
+    let payback = offers.iter().find(|o| o.title == "Arla Kærgården").unwrap();
+    assert_eq!(payback.price, None);
+
+    assert_eq!(offers.iter().filter(|o| o.price.is_none()).count(), 2);
+}
+
 // ---------------------------------------------------------------- Penny
 
 #[test]
