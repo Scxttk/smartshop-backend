@@ -170,6 +170,70 @@ fn row_to_offer(row: &rusqlite::Row) -> rusqlite::Result<Offer> {
     })
 }
 
+pub struct MarketStats {
+    pub market_id: String,
+    pub market_name: String,
+    pub offer_count: i64,
+    pub valid_from_min: Option<String>,
+    pub valid_until_max: Option<String>,
+    // Durchschnittlicher Rabatt in Prozent über Angebote mit beiden Preisen
+    pub avg_discount_pct: Option<f64>,
+}
+
+pub fn market_stats(conn: &Connection) -> Result<Vec<MarketStats>> {
+    let mut stmt = conn.prepare(
+        "SELECT o.market_id, COALESCE(m.name, o.market_id), COUNT(*),
+                MIN(o.valid_from), MAX(o.valid_until),
+                AVG(CASE WHEN o.price IS NOT NULL AND o.regular_price > 0
+                         THEN (1.0 - o.price / o.regular_price) * 100.0 END)
+         FROM offers o LEFT JOIN markets m ON m.id = o.market_id
+         GROUP BY o.market_id
+         ORDER BY COUNT(*) DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(MarketStats {
+            market_id: row.get(0)?,
+            market_name: row.get(1)?,
+            offer_count: row.get(2)?,
+            valid_from_min: row.get(3)?,
+            valid_until_max: row.get(4)?,
+            avg_discount_pct: row.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+pub struct DiscountRow {
+    pub market_name: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub price: f64,
+    pub regular_price: f64,
+    pub discount_pct: f64,
+}
+
+pub fn top_discounts(conn: &Connection, limit: i64) -> Result<Vec<DiscountRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(m.name, o.market_id), o.title, o.subtitle, o.price, o.regular_price,
+                (1.0 - o.price / o.regular_price) * 100.0 AS pct
+         FROM offers o LEFT JOIN markets m ON m.id = o.market_id
+         WHERE o.price IS NOT NULL AND o.regular_price > 0 AND o.price <= o.regular_price
+         ORDER BY pct DESC
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit], |row| {
+        Ok(DiscountRow {
+            market_name: row.get(0)?,
+            title: row.get(1)?,
+            subtitle: row.get(2)?,
+            price: row.get(3)?,
+            regular_price: row.get(4)?,
+            discount_pct: row.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 pub fn upsert_offer(conn: &Connection, offer: &Offer) -> Result<()> {
     let images = serde_json::to_string(&offer.images)?;
     conn.execute(
