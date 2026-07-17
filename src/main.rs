@@ -97,6 +97,12 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// Statistiken über die gespeicherten Angebote anzeigen
+    Stats {
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
     /// Preisverlauf eines Produkts anzeigen
     History {
         /// Suchbegriff (Teilstring des Titels)
@@ -120,6 +126,7 @@ fn main() -> Result<()> {
         Command::Search { query, max_price, db } => search(query, max_price, db),
         Command::Compare { query, db } => compare(query, db),
         Command::Export { format, query, out, db } => export(format, query, out, db),
+        Command::Stats { db } => stats(db),
         Command::History { query, db } => history(query, db),
     }
 }
@@ -331,6 +338,48 @@ fn compare(query: String, db: String) -> Result<()> {
             .unwrap_or_default();
             let sub = offer.subtitle.as_ref().map(|s| format!(" ({s})")).unwrap_or_default();
             println!("  {market:<20} {price:>8}{unit}{sub}");
+        }
+    }
+    Ok(())
+}
+
+fn stats(db: String) -> Result<()> {
+    let conn = db::open(&db)?;
+    let stats = db::market_stats(&conn)?;
+    if stats.is_empty() {
+        println!("Keine Angebote gespeichert.");
+        return Ok(());
+    }
+
+    println!("Angebote pro Markt:");
+    println!("  {:<28} {:>8}  {:<23} {}", "Filiale", "Angebote", "Gültigkeit", "Ø Rabatt");
+    for s in &stats {
+        let range = match (&s.valid_from_min, &s.valid_until_max) {
+            (None, None) => "-".to_string(),
+            (f, u) => format!("{} – {}", f.as_deref().unwrap_or("?"), u.as_deref().unwrap_or("?")),
+        };
+        let discount = s
+            .avg_discount_pct
+            .map(|p| format!("{p:.0} %"))
+            .unwrap_or_else(|| "-".to_string());
+        println!("  {:<28} {:>8}  {:<23} {}", s.market_name, s.offer_count, range, discount);
+    }
+
+    let top = db::top_discounts(&conn, 10)?;
+    if !top.is_empty() {
+        println!("\nTop 10 Rabatte:");
+        for (i, d) in top.iter().enumerate() {
+            let sub = d.subtitle.as_ref().map(|s| format!(" {s}")).unwrap_or_default();
+            println!(
+                "  {:>2}. -{:.0} %  {}{} — {:.2} € statt {:.2} € ({})",
+                i + 1,
+                d.discount_pct,
+                d.title,
+                sub,
+                d.price,
+                d.regular_price,
+                d.market_name
+            );
         }
     }
     Ok(())
