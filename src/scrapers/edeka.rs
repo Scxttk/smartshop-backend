@@ -234,7 +234,7 @@ mod tests {
     #[test]
     #[ignore = "Live-Test gegen edeka.de"]
     fn live_fetch_offers() {
-        let market = find_market("48683").expect("Markt");
+        let market = find_market("01219").expect("Markt");
         println!("Markt: {} ({})", market.name, market.id);
 
         let offers = fetch_offers(&market).expect("Angebote");
