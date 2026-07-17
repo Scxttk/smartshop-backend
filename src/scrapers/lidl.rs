@@ -91,7 +91,7 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
 
 // Ein Produkt-Tile defensiv in ein Offer übersetzen; bei fehlenden
 // Pflichtfeldern None (Tile wird übersprungen).
-fn parse_tile(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
+pub fn parse_tile(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
     let data = item.get("gridbox")?.get("data")?;
 
     let title = data
@@ -101,7 +101,13 @@ fn parse_tile(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
         .filter(|s| !s.is_empty())?
         .to_string();
 
-    let price_obj = data.get("price");
+    // Lidl-Plus-exklusive Angebote tragen ihren Preis nicht in data.price
+    // (dort steht nur eine leere Hülle mit currencyCode), sondern in
+    // data.lidlPlus[0].price — daher der Fallback.
+    let price_obj = data
+        .get("price")
+        .filter(|p| p.get("price").is_some())
+        .or_else(|| item.pointer("/gridbox/data/lidlPlus/0/price"));
     let price = price_obj.and_then(|p| p.get("price")).and_then(|v| v.as_f64());
     let regular_price = price_obj
         .and_then(|p| p.get("oldPrice"))
@@ -120,6 +126,14 @@ fn parse_tile(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
             let amount = pack.get("amount")?.as_f64()?;
             let unit = pack.get("unit")?.as_str()?;
             Some(format!("{amount} {unit}"))
+        })
+        .or_else(|| {
+            // Lidl-Plus-Preise haben nur einen Freitext ("Je Stück")
+            price_obj?
+                .get("packaging")?
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(String::from)
         })
         .or_else(|| {
             price_obj?
