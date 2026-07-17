@@ -2,7 +2,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use smartshop::models::Offer;
-use smartshop::{db, scrapers, units};
+use smartshop::stores::{Store, save_offers, scrape_store};
+use smartshop::{db, units};
 
 #[derive(Parser)]
 #[command(name = "smartshop", about = "Supermarkt-Angebote scrapen und speichern")]
@@ -15,18 +16,6 @@ struct Cli {
 enum ExportFormat {
     Json,
     Csv,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum Store {
-    Rewe,
-    Penny,
-    Kaufland,
-    Lidl,
-    Netto,
-    AldiNord,
-    AldiSued,
-    Edeka,
 }
 
 #[derive(Subcommand)]
@@ -163,6 +152,28 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// Alle aktiven Regionen aus Supabase abrufen und syncen (fetch + push)
+    SyncRegions {
+        /// Höchstens so viele Regionen pro Lauf syncen
+        #[arg(long, default_value_t = 10)]
+        max_regions: usize,
+
+        /// Pfad zum Rewe TLS-Zertifikat (PEM)
+        #[arg(long, default_value = "cert.pem")]
+        cert: String,
+
+        /// Pfad zum privaten Schlüssel
+        #[arg(long, default_value = "private.key")]
+        key: String,
+
+        /// Nur zeigen, was hochgeladen würde — keine Supabase-Writes
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
     /// Preisverlauf eines Produkts anzeigen
     History {
         /// Suchbegriff (Teilstring des Titels)
@@ -281,6 +292,18 @@ fn main() -> Result<()> {
                 dry_run,
             };
             smartshop::push::run(&opts, None)
+        }
+        Command::SyncRegions { max_regions, cert, key, dry_run, db } => {
+            let opts = smartshop::sync::SyncOptions { db_path: db, dry_run, max_regions };
+            let fetcher = |plz: &str| {
+                Store::ALL
+                    .iter()
+                    .map(|store| {
+                        (store.chain().to_string(), scrape_store(*store, plz, &cert, &key))
+                    })
+                    .collect()
+            };
+            smartshop::sync::run(&opts, None, &fetcher)
         }
         Command::History { query, db } => history(query, db),
     }
@@ -519,73 +542,6 @@ fn history(query: String, db: String) -> Result<()> {
     Ok(())
 }
 
-impl Store {
-    const ALL: [Store; 8] = [
-        Store::Rewe,
-        Store::Penny,
-        Store::Kaufland,
-        Store::Lidl,
-        Store::Netto,
-        Store::AldiNord,
-        Store::AldiSued,
-        Store::Edeka,
-    ];
-
-    fn label(&self) -> &'static str {
-        match self {
-            Store::Rewe => "Rewe",
-            Store::Penny => "Penny",
-            Store::Kaufland => "Kaufland",
-            Store::Lidl => "Lidl",
-            Store::Netto => "Netto",
-            Store::AldiNord => "Aldi Nord",
-            Store::AldiSued => "Aldi Süd",
-            Store::Edeka => "Edeka",
-        }
-    }
-
-    // Anzeigename der Kette im Supabase-Schema (Spalte `market`)
-    fn chain(&self) -> &'static str {
-        match self {
-            Store::Rewe => "REWE",
-            Store::Penny => "Penny",
-            Store::Kaufland => "Kaufland",
-            Store::Lidl => "Lidl",
-            Store::Netto => "Netto",
-            Store::AldiNord => "ALDI Nord",
-            Store::AldiSued => "ALDI SÜD",
-            Store::Edeka => "EDEKA",
-        }
-    }
-}
-
-fn scrape_store(store: Store, zip: &str, cert: &str, key: &str) -> Result<(smartshop::models::Market, Vec<Offer>)> {
-    println!("Suche {}-Markt für PLZ {zip}...", store.label());
-    let market = match store {
-        Store::Rewe => scrapers::rewe::find_market(zip, cert, key)?,
-        Store::Penny => scrapers::penny::find_market(zip)?,
-        Store::Kaufland => scrapers::kaufland::find_market(zip)?,
-        Store::Lidl => scrapers::lidl::find_market(zip)?,
-        Store::Netto => scrapers::netto::find_market(zip)?,
-        Store::AldiNord => scrapers::aldi_nord::find_market(zip)?,
-        Store::AldiSued => scrapers::aldi_sued::find_market(zip)?,
-        Store::Edeka => scrapers::edeka::find_market(zip)?,
-    };
-    println!("Markt gefunden: {} (ID: {})", market.name, market.id);
-    println!("Lade Angebote...");
-    let offers = match store {
-        Store::Rewe => scrapers::rewe::fetch_offers(&market, cert, key)?,
-        Store::Penny => scrapers::penny::fetch_offers(&market)?,
-        Store::Kaufland => scrapers::kaufland::fetch_offers(&market)?,
-        Store::Lidl => scrapers::lidl::fetch_offers(&market)?,
-        Store::Netto => scrapers::netto::fetch_offers(&market)?,
-        Store::AldiNord => scrapers::aldi_nord::fetch_offers(&market)?,
-        Store::AldiSued => scrapers::aldi_sued::fetch_offers(&market)?,
-        Store::Edeka => scrapers::edeka::fetch_offers(&market)?,
-    };
-    Ok((market, offers))
-}
-
 fn notify_watchlist(db: &str) -> Result<()> {
     println!("\nDeals für deine Watchlist:");
     let conn = db::open(db)?;
@@ -645,15 +601,6 @@ fn fetch_all(zip: String, cert: String, key: String, dry_run: bool, db: &str) ->
             }
         };
         println!("  {:<10} {:<28} {}", row.store, row.market, result);
-    }
-    Ok(())
-}
-
-fn save_offers(db: &str, market: &smartshop::models::Market, offers: &[Offer]) -> Result<()> {
-    let conn = db::open(db)?;
-    db::upsert_market(&conn, market)?;
-    for offer in offers {
-        db::upsert_offer(&conn, offer)?;
     }
     Ok(())
 }
