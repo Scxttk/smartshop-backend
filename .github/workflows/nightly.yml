@@ -1,0 +1,90 @@
+name: Nightly fetch+push
+
+on:
+  schedule:
+    # 04:30 UTC = 06:30 MESZ (Sommer) bzw. 05:30 MEZ (Winter) — siehe docs/ci.md.
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SMARTSHOP_ZIP: ${{ vars.SMARTSHOP_ZIP }}
+      DB: ${{ github.workspace }}/nightly.db
+      LOG: ${{ github.workspace }}/nightly.log
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight (ZIP variable, curl, sqlite3)
+        run: |
+          if [ -z "$SMARTSHOP_ZIP" ]; then
+            echo "::error::Repo-Variable SMARTSHOP_ZIP ist nicht gesetzt (Settings -> Variables)."
+            exit 1
+          fi
+          # Netto/ALDI Süd/EDEKA werden über system-curl geholt (Akamai).
+          command -v curl >/dev/null || { echo "::error::curl fehlt auf dem Runner."; exit 1; }
+          curl --version | head -1
+          command -v sqlite3 >/dev/null || { sudo apt-get update && sudo apt-get install -y sqlite3; }
+          sqlite3 --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release
+
+      # REWE läuft ohne Client-Zertifikat und schlägt pro Store fehl; das ist
+      # erwartet. fetch --all-stores bricht bei einzelnen Store-Fehlern nicht ab.
+      - name: Fetch offers (all stores)
+        run: |
+          set -o pipefail
+          ./target/release/smartshop fetch --all-stores \
+            --zip "$SMARTSHOP_ZIP" --db "$DB" 2>&1 | tee "$LOG"
+
+      - name: Store summary + zero-offer check
+        run: |
+          {
+            echo "## Nightly fetch (PLZ $SMARTSHOP_ZIP)"
+            echo ""
+            echo "| Markt | Filiale | Ergebnis |"
+            echo "|---|---|---|"
+            # "Zusammenfassung:"-Block aus dem fetch-Log in eine Markdown-Tabelle
+            # umformen (Spalten sind mit >=2 Leerzeichen getrennt).
+            sed -n '/^Zusammenfassung:/,$p' "$LOG" | tail -n +3 \
+              | sed -E 's/^ +//; s/ {2,}/ | /g; s/^/| /; s/$/ |/'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          COUNT=$(sqlite3 "$DB" 'SELECT COUNT(*) FROM offers')
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Angebote insgesamt: $COUNT**" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::Fetch hat 0 Angebote geliefert — alle Stores fehlgeschlagen (Akamai blockt evtl. Runner-IPs, siehe docs/ci.md)."
+            exit 1
+          fi
+          echo "$COUNT Angebote in der DB."
+
+      - name: Push to Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          set -o pipefail
+          ./target/release/smartshop push --region "$SMARTSHOP_ZIP" --db "$DB" \
+            2>&1 | tee -a "$LOG"
+
+      - name: Upload run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-log
+          path: nightly.log
+          if-no-files-found: ignore
+          retention-days: 7
