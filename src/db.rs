@@ -6,7 +6,7 @@ use crate::models::{Market, Offer};
 /// Aktuelle Schema-Version (PRAGMA user_version). Zukünftige Schema-Änderungen
 /// müssen SCHEMA_VERSION erhöhen und in migrate() einen Migrationsschritt
 /// von der Vorversion ergänzen.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 pub fn open(path: &str) -> Result<Connection> {
     let conn = Connection::open(path)?;
@@ -20,23 +20,36 @@ pub fn schema_version(conn: &Connection) -> Result<i64> {
 }
 
 fn migrate(conn: &Connection) -> Result<()> {
-    let version = schema_version(conn)?;
-    match version {
-        // 0 = neue oder vor Einführung der Versionierung angelegte DB;
-        // init_schema ist idempotent (CREATE IF NOT EXISTS) und entspricht v1.
-        0 => {
-            init_schema(conn)?;
-            conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
-        }
-        SCHEMA_VERSION => {}
-        v if v > SCHEMA_VERSION => {
-            bail!(
-                "Datenbank hat Schema-Version {v}, dieses Programm unterstützt maximal {SCHEMA_VERSION}. Bitte smartshop aktualisieren."
-            );
-        }
-        // Platz für künftige Migrationen v -> v+1
-        v => bail!("Unbekannte Schema-Version {v} — keine Migration definiert."),
+    let mut version = schema_version(conn)?;
+    if version > SCHEMA_VERSION {
+        bail!(
+            "Datenbank hat Schema-Version {version}, dieses Programm unterstützt maximal {SCHEMA_VERSION}. Bitte smartshop aktualisieren."
+        );
     }
+    while version < SCHEMA_VERSION {
+        match version {
+            // 0 = neue oder vor Einführung der Versionierung angelegte DB;
+            // init_schema ist idempotent (CREATE IF NOT EXISTS) und entspricht v1.
+            0 => init_schema(conn)?,
+            1 => migrate_v1_to_v2(conn)?,
+            v => bail!("Unbekannte Schema-Version {v} — keine Migration definiert."),
+        }
+        version += 1;
+        conn.execute_batch(&format!("PRAGMA user_version = {version};"))?;
+    }
+    Ok(())
+}
+
+// v2: Watchlist-Tabelle
+fn migrate_v1_to_v2(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS watches (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            query      TEXT NOT NULL,
+            max_price  REAL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );",
+    )?;
     Ok(())
 }
 
@@ -79,6 +92,56 @@ fn init_schema(conn: &Connection) -> Result<()> {
             ON price_history (title);
     ")?;
     Ok(())
+}
+
+pub struct Watch {
+    pub id: i64,
+    pub query: String,
+    pub max_price: Option<f64>,
+    pub created_at: String,
+}
+
+pub fn add_watch(conn: &Connection, query: &str, max_price: Option<f64>) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO watches (query, max_price) VALUES (?1, ?2)",
+        params![query, max_price],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn watches(conn: &Connection) -> Result<Vec<Watch>> {
+    let mut stmt =
+        conn.prepare("SELECT id, query, max_price, created_at FROM watches ORDER BY id")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Watch {
+            id: row.get(0)?,
+            query: row.get(1)?,
+            max_price: row.get(2)?,
+            created_at: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// true, wenn ein Eintrag gelöscht wurde
+pub fn remove_watch(conn: &Connection, id: i64) -> Result<bool> {
+    let n = conn.execute("DELETE FROM watches WHERE id = ?1", params![id])?;
+    Ok(n > 0)
+}
+
+/// Angebote, die auf einen Watch passen: Titel ODER Untertitel enthält die
+/// Suchanfrage, optional bis max_price.
+pub fn watch_hits(conn: &Connection, watch: &Watch) -> Result<Vec<Offer>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, market_id, title, subtitle, overline, price, regular_price,
+                category, nutri_score, valid_from, valid_until, images, biozid, flyer_page
+         FROM offers
+         WHERE (title LIKE '%' || ?1 || '%' OR subtitle LIKE '%' || ?1 || '%')
+           AND (?2 IS NULL OR price <= ?2)
+         ORDER BY price ASC",
+    )?;
+    let rows = stmt.query_map(params![watch.query, watch.max_price], row_to_offer)?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
 pub fn upsert_market(conn: &Connection, market: &Market) -> Result<()> {

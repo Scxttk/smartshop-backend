@@ -103,10 +103,47 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// Watchlist verwalten: Produkte beobachten und Treffer finden
+    Watch {
+        #[command(subcommand)]
+        action: WatchAction,
+    },
     /// Preisverlauf eines Produkts anzeigen
     History {
         /// Suchbegriff (Teilstring des Titels)
         query: String,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum WatchAction {
+    /// Produkt zur Watchlist hinzufügen
+    Add {
+        /// Suchbegriff (Teilstring von Titel/Untertitel)
+        query: String,
+
+        /// Nur Treffer bis zu diesem Preis melden
+        #[arg(long)]
+        max_price: Option<f64>,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
+    /// Alle Watchlist-Einträge anzeigen
+    List {
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
+    /// Eintrag aus der Watchlist entfernen
+    Remove {
+        /// ID des Eintrags (siehe `watch list`)
+        id: i64,
 
         /// Pfad zur SQLite-Datenbank
         #[arg(long, default_value = "smartshop.db")]
@@ -127,7 +164,48 @@ fn main() -> Result<()> {
         Command::Compare { query, db } => compare(query, db),
         Command::Export { format, query, out, db } => export(format, query, out, db),
         Command::Stats { db } => stats(db),
+        Command::Watch { action } => watch(action),
         Command::History { query, db } => history(query, db),
+    }
+}
+
+fn watch(action: WatchAction) -> Result<()> {
+    match action {
+        WatchAction::Add { query, max_price, db } => {
+            let conn = db::open(&db)?;
+            let id = db::add_watch(&conn, &query, max_price)?;
+            let limit = max_price
+                .map(|p| format!(" (bis {p:.2} €)"))
+                .unwrap_or_default();
+            println!("Watch #{id} angelegt: '{query}'{limit}");
+            Ok(())
+        }
+        WatchAction::List { db } => {
+            let conn = db::open(&db)?;
+            let watches = db::watches(&conn)?;
+            if watches.is_empty() {
+                println!("Watchlist ist leer. Mit `smartshop watch add <Suchbegriff>` anlegen.");
+                return Ok(());
+            }
+            println!("  {:>4}  {:<30} {:>10}  {}", "ID", "Suchbegriff", "Max-Preis", "Angelegt");
+            for w in &watches {
+                let max = w
+                    .max_price
+                    .map(|p| format!("{p:.2} €"))
+                    .unwrap_or_else(|| "-".to_string());
+                println!("  {:>4}  {:<30} {:>10}  {}", w.id, w.query, max, w.created_at);
+            }
+            Ok(())
+        }
+        WatchAction::Remove { id, db } => {
+            let conn = db::open(&db)?;
+            if db::remove_watch(&conn, id)? {
+                println!("Watch #{id} entfernt.");
+            } else {
+                println!("Kein Watch mit ID {id} gefunden.");
+            }
+            Ok(())
+        }
     }
 }
 
