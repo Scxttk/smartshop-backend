@@ -52,6 +52,25 @@ fn map_basic_fields() {
 }
 
 #[test]
+fn map_takes_first_image_and_keeps_emoji_fallback() {
+    // Mit Bild: erste nicht-leere URL landet in image_url, Emoji bleibt gesetzt.
+    let mut o = offer("Gouda", Some(1.99));
+    o.images = vec![
+        "".to_string(),
+        "https://cdn.example/gouda-450.jpg".to_string(),
+        "https://cdn.example/gouda-900.jpg".to_string(),
+    ];
+    let row = map_offer(&o, "REWE", None).unwrap();
+    assert_eq!(row.image_url.as_deref(), Some("https://cdn.example/gouda-450.jpg"));
+    assert_eq!(row.emoji.as_deref(), Some("🧀"));
+
+    // Ohne Bild: image_url None, Emoji trägt weiterhin die Anzeige.
+    let row = map_offer(&offer("Gouda", Some(1.99)), "REWE", None).unwrap();
+    assert_eq!(row.image_url, None);
+    assert_eq!(row.emoji.as_deref(), Some("🧀"));
+}
+
+#[test]
 fn map_skips_offers_without_price() {
     assert!(map_offer(&offer("Gouda", None), "REWE", None).is_none());
 }
@@ -116,11 +135,14 @@ fn map_prefers_explicit_base_price() {
 
 #[test]
 fn map_serializes_to_expected_json() {
-    let row = map_offer(&offer("Gouda", Some(1.99)), "REWE", Some("01219")).unwrap();
+    let mut o = offer("Gouda", Some(1.99));
+    o.images = vec!["https://cdn.example/gouda-450.jpg".to_string()];
+    let row = map_offer(&o, "REWE", Some("01219")).unwrap();
     let v = serde_json::to_value(&row).unwrap();
     assert_eq!(v["market"], "REWE");
     assert_eq!(v["price"], 1.99);
     assert_eq!(v["emoji"], "🧀");
+    assert_eq!(v["image_url"], "https://cdn.example/gouda-450.jpg");
     assert_eq!(v["source"], "smartshop-rust");
     assert_eq!(v["region"], "01219");
 }
@@ -280,6 +302,7 @@ fn run_push(db_path: &str, base_url: &str) -> anyhow::Result<()> {
         chain: None,
         region: Some("01219".to_string()),
         dry_run: false,
+        mirror_images: false,
     };
     let cfg = PushConfig { base_url: base_url.to_string(), api_key: "test-key".to_string() };
     push::run(&opts, Some(&cfg))
@@ -343,6 +366,7 @@ fn parse_rows(body: &str) -> Vec<SupabaseRow> {
             unit: r["unit"].as_str().unwrap().to_string(),
             category: r["category"].as_str().map(String::from),
             emoji: None,
+            image_url: r["image_url"].as_str().map(String::from),
             valid_from: r["valid_from"].as_str().map(String::from),
             valid_until: r["valid_until"].as_str().map(String::from),
             base_price: r["base_price"].as_f64(),
@@ -371,7 +395,7 @@ fn push_fails_with_german_error_on_http_error() {
 fn push_requires_region_unless_dry_run() {
     let db_path = temp_db("region");
     seed_db(&db_path, 1);
-    let opts = PushOptions { db_path, chain: None, region: None, dry_run: false };
+    let opts = PushOptions { db_path, chain: None, region: None, dry_run: false, mirror_images: false };
     let err = push::run(&opts, None).unwrap_err().to_string();
     assert!(err.contains("--region"), "{err}");
 }
@@ -381,10 +405,80 @@ fn dry_run_makes_no_requests() {
     let db_path = temp_db("dry");
     seed_db(&db_path, 3);
     let (_base_url, log) = spawn_mock();
-    let opts = PushOptions { db_path, chain: None, region: None, dry_run: true };
-    // cfg: None — Dry-Run braucht weder Env noch Netzwerk
+    let opts = PushOptions { db_path, chain: None, region: None, dry_run: true, mirror_images: true };
+    // cfg: None — Dry-Run braucht weder Env noch Netzwerk (auch nicht fürs Spiegeln)
     push::run(&opts, None).unwrap();
     assert!(log.lock().unwrap().is_empty());
+}
+
+#[test]
+fn push_mirrors_images_and_caches_them() {
+    let db_path = temp_db("mirror");
+    let (base_url, log) = spawn_mock();
+
+    // REWE-Markt + ein Angebot MIT Bild; die Bild-URL zeigt auf den Mock, damit
+    // der Download klappt.
+    let _ = std::fs::remove_file(&db_path);
+    let conn = db::open(&db_path).unwrap();
+    db::upsert_market(&conn, &Market { id: "m1".to_string(), name: "REWE Christian Koehler oHG".to_string() })
+        .unwrap();
+    let mut o = offer("Gouda", Some(1.99));
+    o.images = vec![format!("{base_url}/img/gouda.jpg")];
+    db::upsert_offer(&conn, &o).unwrap();
+    drop(conn);
+
+    let cfg = PushConfig { base_url: base_url.clone(), api_key: "k".to_string() };
+    let opts = PushOptions {
+        db_path: db_path.clone(),
+        chain: None,
+        region: Some("01219".to_string()),
+        dry_run: false,
+        mirror_images: true,
+    };
+
+    // Erster Lauf: Bild laden und in den Bucket hochladen.
+    push::run(&opts, Some(&cfg)).unwrap();
+    let reqs = log.lock().unwrap().clone();
+
+    assert!(
+        reqs.iter().any(|r| r.method == "GET" && r.target == "/img/gouda.jpg"),
+        "Bild-Download fehlt: {reqs:#?}"
+    );
+    let upload = reqs
+        .iter()
+        .find(|r| r.method == "POST" && r.target.starts_with("/storage/v1/object/offer-images/"))
+        .expect("Storage-Upload fehlt");
+    assert_eq!(upload.header("x-upsert"), Some("true"));
+    assert_eq!(upload.header("apikey"), Some("k"));
+
+    let offers_post = reqs
+        .iter()
+        .find(|r| r.method == "POST" && r.target.starts_with("/rest/v1/offers"))
+        .expect("Offers-Upsert fehlt");
+    assert!(
+        offers_post.body.contains("/storage/v1/object/public/offer-images/"),
+        "image_url zeigt nicht auf den Bucket: {}",
+        offers_post.body
+    );
+
+    // Zweiter Lauf: Cache-Treffer -> weder erneuter Download noch Upload.
+    log.lock().unwrap().clear();
+    push::run(&opts, Some(&cfg)).unwrap();
+    let reqs2 = log.lock().unwrap().clone();
+    assert!(
+        !reqs2.iter().any(|r| r.target.starts_with("/storage/v1/object/offer-images/")),
+        "Bild wurde erneut hochgeladen: {reqs2:#?}"
+    );
+    assert!(
+        !reqs2.iter().any(|r| r.target == "/img/gouda.jpg"),
+        "Bild wurde erneut geladen"
+    );
+    // Die Zeile trägt trotzdem die Bucket-URL.
+    let offers_post2 = reqs2
+        .iter()
+        .find(|r| r.method == "POST" && r.target.starts_with("/rest/v1/offers"))
+        .unwrap();
+    assert!(offers_post2.body.contains("/storage/v1/object/public/offer-images/"));
 }
 
 #[test]
@@ -397,6 +491,7 @@ fn chain_filter_limits_push() {
         chain: Some("Lidl".to_string()), // DB enthält nur REWE
         region: Some("01219".to_string()),
         dry_run: false,
+        mirror_images: false,
     };
     let cfg = PushConfig { base_url, api_key: "k".to_string() };
     push::run(&opts, Some(&cfg)).unwrap();

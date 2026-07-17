@@ -154,6 +154,7 @@ fn sync_region(opts: &SyncOptions, cfg: &PushConfig, fetcher: &Fetcher, plz: &st
             chain: None,
             region: Some(plz.to_string()),
             dry_run: opts.dry_run,
+            mirror_images: true,
         },
         Some(cfg),
     )

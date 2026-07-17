@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::models::{Market, Offer};
-use crate::{db, enrich, units};
+use crate::{db, enrich, storage, units};
 
 pub const BATCH_SIZE: usize = 100;
 
@@ -24,6 +24,7 @@ pub struct SupabaseRow {
     pub unit: String,
     pub category: Option<String>,
     pub emoji: Option<String>,
+    pub image_url: Option<String>,
     pub valid_from: Option<String>,
     pub valid_until: Option<String>,
     pub base_price: Option<f64>,
@@ -122,6 +123,8 @@ pub fn map_offer(offer: &Offer, chain: &str, region: Option<&str>) -> Option<Sup
         },
         category: Some(enriched.category.to_string()),
         emoji: Some(enriched.emoji.to_string()),
+        // Erste echte Bild-URL vom Scraper; Emoji bleibt als Fallback erhalten.
+        image_url: offer.images.iter().find(|u| !u.is_empty()).cloned(),
         valid_from: offer.valid_from.clone(),
         valid_until: offer.valid_until.clone(),
         base_price: unit_price.map(|up| (up.eur * 100.0).round() / 100.0),
@@ -204,6 +207,9 @@ pub struct PushOptions {
     /// PLZ, aus der die Angebote stammen. Pflicht außer bei --dry-run.
     pub region: Option<String>,
     pub dry_run: bool,
+    /// Produktbilder in den Supabase-Storage-Bucket spiegeln (Händler-URL ->
+    /// Bucket-URL). Bei --dry-run wird ohnehin nicht gespiegelt.
+    pub mirror_images: bool,
 }
 
 /// Angebote aus der lokalen DB laden und pro Kette gruppieren (gemappt,
@@ -271,6 +277,48 @@ fn check_response(what: &str, resp: reqwest::blocking::Response) -> Result<()> {
     bail!("{what} fehlgeschlagen (HTTP {status}): {excerpt}");
 }
 
+/// Händler-Bild-URLs in den Storage-Bucket spiegeln und die Zeilen auf die
+/// Bucket-URL umschreiben. Bekannte Bilder liefert der lokale Cache ohne
+/// Netzwerkzugriff; Fehler eines einzelnen Bildes lassen die Händler-URL stehen
+/// (Emoji bleibt der letzte Fallback) und brechen den Push nicht ab.
+/// Liefert (neu gespiegelt, aus Cache, fehlgeschlagen).
+fn mirror_images(
+    groups: &mut BTreeMap<&'static str, (Vec<SupabaseRow>, usize)>,
+    cfg: &PushConfig,
+    db_path: &str,
+) -> Result<(usize, usize, usize)> {
+    let conn = db::open(db_path)?;
+    let client = reqwest::blocking::Client::new();
+    let (mut fresh, mut cached, mut failed) = (0usize, 0usize, 0usize);
+
+    for (_chain, (rows, _)) in groups.iter_mut() {
+        for row in rows.iter_mut() {
+            let Some(src) = row.image_url.clone() else { continue };
+            // Schon eine Bucket-URL (z. B. erneuter Lauf ohne DB-Cache-Treffer)?
+            if src.contains(&format!("/{}/", storage::BUCKET)) {
+                continue;
+            }
+            if let Some(hit) = db::cached_image_url(&conn, &src)? {
+                row.image_url = Some(hit);
+                cached += 1;
+                continue;
+            }
+            match storage::mirror(&client, cfg, &src) {
+                Ok(public) => {
+                    db::cache_image_url(&conn, &src, &public)?;
+                    row.image_url = Some(public);
+                    fresh += 1;
+                }
+                Err(e) => {
+                    eprintln!("  Bild übersprungen ({src}): {e}");
+                    failed += 1;
+                }
+            }
+        }
+    }
+    Ok((fresh, cached, failed))
+}
+
 /// Alle gepushten Zeilen zusätzlich in `public.price_history` upserten
 /// (Wochen-Schnappschuss für Preisverlaufs-Charts). Zeilen ohne Preis kommen
 /// hier nie an — map_offer filtert sie bereits. Liefert die Zeilenzahl.
@@ -297,7 +345,7 @@ fn push_history(
 }
 
 pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
-    let groups = load_grouped(opts)?;
+    let mut groups = load_grouped(opts)?;
     if groups.is_empty() {
         println!("Keine passenden Angebote in '{}' gefunden.", opts.db_path);
         return Ok(());
@@ -314,6 +362,13 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
         Some(c) => c,
         None => &config_from_env()?,
     };
+
+    // Produktbilder in den Storage-Bucket spiegeln, bevor die Zeilen hochgeladen
+    // werden — so trägt image_url die stabile Bucket-URL statt der Händler-URL.
+    if opts.mirror_images {
+        let (fresh, cached, failed) = mirror_images(&mut groups, cfg, &opts.db_path)?;
+        println!("Bilder: {fresh} neu gespiegelt, {cached} aus Cache, {failed} fehlgeschlagen.");
+    }
 
     let client = reqwest::blocking::Client::new();
     let offers_url = format!("{}/rest/v1/offers", cfg.base_url);
