@@ -153,3 +153,51 @@ fn compare_groups_products_cheapest_first() {
     assert!(pos_m2 < pos_m1, "body: {body}");
     assert!(body.contains("1.39 €") && body.contains("1.59 €"), "body: {body}");
 }
+
+#[test]
+fn watchlist_add_and_remove_roundtrip() {
+    let dbf = fixture_db("watchlist");
+    let addr = spawn_server(&dbf);
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+
+    // Leere Watchlist
+    let (status, body) = get(addr, "/watchlist");
+    assert_eq!(status, 200);
+    assert!(body.contains("Keine Beobachtungen angelegt."), "body: {body}");
+
+    // Anlegen -> Redirect -> taucht auf
+    let resp = client
+        .post(format!("http://{addr}/watchlist/add"))
+        .form(&[("query", "Kaffee"), ("max_price", "5.00")])
+        .send()
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 303);
+    assert_eq!(resp.headers()["location"], "/watchlist");
+    let (status, body) = get(addr, "/watchlist");
+    assert_eq!(status, 200);
+    assert!(body.contains("Kaffee"), "body: {body}");
+    assert!(body.contains("bis 5.00 €"), "body: {body}");
+
+    // Entfernen -> Redirect -> verschwunden
+    let resp = client
+        .post(format!("http://{addr}/watchlist/remove"))
+        .form(&[("id", "1")])
+        .send()
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 303);
+    let (status, body) = get(addr, "/watchlist");
+    assert_eq!(status, 200);
+    assert!(!body.contains("Kaffee"), "body: {body}");
+
+    // Leere Query -> 400 mit deutscher Fehlermeldung
+    let resp = client
+        .post(format!("http://{addr}/watchlist/add"))
+        .form(&[("query", "  ")])
+        .send()
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 400);
+    assert!(resp.text().unwrap().contains("fehlt oder ist leer"), "Fehlermeldung fehlt");
+}
