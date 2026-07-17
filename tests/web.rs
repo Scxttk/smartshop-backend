@@ -201,3 +201,29 @@ fn watchlist_add_and_remove_roundtrip() {
     assert_eq!(resp.status().as_u16(), 400);
     assert!(resp.text().unwrap().contains("fehlt oder ist leer"), "Fehlermeldung fehlt");
 }
+
+#[test]
+fn history_renders_svg_sparkline() {
+    let dbf = fixture_db("history");
+    // Synthetischer Verlauf: Butter war vor einer Woche teurer (Muster aus tests/cli.rs)
+    let conn = db::open(dbf.to_str().unwrap()).unwrap();
+    conn.execute_batch(
+        "INSERT INTO price_history (offer_id, market_id, title, price, seen_at)
+         VALUES ('o1', 'M1', 'MEGGLE Feine Butter', 2.59, date('now', '-7 days'));",
+    )
+    .unwrap();
+    drop(conn);
+    let addr = spawn_server(&dbf);
+
+    let (status, body) = get(addr, "/history?offer=Butter");
+    assert_eq!(status, 200);
+    assert!(body.contains("<svg"), "body: {body}");
+    assert!(body.contains("polyline"), "body: {body}");
+    assert!(body.contains("MEGGLE Feine Butter"), "body: {body}");
+    assert!(body.contains("2.59 €") && body.contains("1.59 €"), "body: {body}");
+
+    // Unbekanntes Produkt
+    let (status, body) = get(addr, "/history?offer=Raumschiff");
+    assert_eq!(status, 200);
+    assert!(body.contains("Keine Preisdaten für 'Raumschiff'."), "body: {body}");
+}

@@ -2,6 +2,7 @@
 //! Wird vom serve-Subcommand zusätzlich zur JSON-API (unter /api) gemountet.
 
 mod html;
+mod svg;
 
 use std::sync::Arc;
 
@@ -56,6 +57,7 @@ pub fn router(db_path: String) -> Router {
         .route("/watchlist", get(watchlist))
         .route("/watchlist/add", post(watchlist_add))
         .route("/watchlist/remove", post(watchlist_remove))
+        .route("/history", get(history))
         .with_state(Arc::new(WebState { db_path }))
 }
 
@@ -381,4 +383,55 @@ async fn watchlist_remove(
     let conn = db::open(&state.db_path)?;
     db::remove_watch(&conn, form.id)?;
     Ok(Redirect::to("/watchlist"))
+}
+
+// ---------- /history ----------
+
+#[derive(Deserialize)]
+struct HistoryParams {
+    offer: Option<String>,
+}
+
+async fn history(
+    State(state): SharedState,
+    Query(params): Query<HistoryParams>,
+) -> Result<Html<String>, WebError> {
+    let q = params.offer.unwrap_or_default();
+    let mut body = search_form("/history", "offer", &q, "Produkt");
+    if !q.is_empty() {
+        let conn = db::open(&state.db_path)?;
+        let points = db::price_history(&conn, &q)?;
+        if points.is_empty() {
+            body.push_str(&format!(
+                "<p class=\"hinweis\">Keine Preisdaten für '{}'.</p>",
+                escape(&q)
+            ));
+        } else {
+            let names = market_names(&conn)?;
+            // Punkte je (Titel, Markt) gruppieren; Reihenfolge des Auftretens,
+            // innerhalb der Gruppe bereits nach seen_at sortiert (SQL).
+            let mut groups: Vec<((String, String), Vec<&db::PricePoint>)> = Vec::new();
+            for p in &points {
+                let key = (p.title.clone(), p.market_id.clone());
+                match groups.iter_mut().find(|(k, _)| *k == key) {
+                    Some((_, list)) => list.push(p),
+                    None => groups.push((key, vec![p])),
+                }
+            }
+            for ((title, market_id), pts) in groups {
+                let market = names.get(&market_id).unwrap_or(&market_id);
+                body.push_str(&format!("<h2>{} ({})</h2>", escape(&title), escape(market)));
+                let prices: Vec<f64> = pts.iter().filter_map(|p| p.price).collect();
+                if !prices.is_empty() {
+                    body.push_str(&svg::sparkline(&prices));
+                }
+                let rows: Vec<Vec<String>> = pts
+                    .iter()
+                    .map(|p| vec![escape(&p.seen_at), price(p.price)])
+                    .collect();
+                body.push_str(&table(&["Gesehen am", ">Preis"], &rows));
+            }
+        }
+    }
+    Ok(Html(page("Preisverlauf", &body)))
 }
