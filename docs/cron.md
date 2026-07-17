@@ -103,22 +103,22 @@ smartshop serve --db "$HOME/.local/share/smartshop/smartshop.db" --port 8080
 
 | Endpoint | Parameter | Liefert |
 |---|---|---|
-| `GET /markets` | – | Gespeicherte Filialen |
-| `GET /offers` | `q` (Pflicht), `max_price`, `market` | Angebote zur Suche |
-| `GET /compare` | `q` (Pflicht) | Preisvergleich, gruppiert pro Produkt |
-| `GET /stats` | – | Angebote/Filiale + Top-10-Rabatte |
-| `GET /history` | `q` (Pflicht) | Preisverlauf |
-| `GET /deals` | `since` (Tage, optional) | Preissenkungen |
-| `GET /watches` | – | Watchlist-Einträge |
-| `GET /watches/check` | – | `{"hits": bool, "watches": [...]}` |
-| `GET /list` | – | Einkaufsliste |
-| `GET /list/suggest` | – | Günstigster Markt je Listen-Artikel |
+| `GET /api/markets` | – | Gespeicherte Filialen |
+| `GET /api/offers` | `q` (Pflicht), `max_price`, `market` | Angebote zur Suche |
+| `GET /api/compare` | `q` (Pflicht) | Preisvergleich, gruppiert pro Produkt |
+| `GET /api/stats` | – | Angebote/Filiale + Top-10-Rabatte |
+| `GET /api/history` | `q` (Pflicht) | Preisverlauf |
+| `GET /api/deals` | `since` (Tage, optional) | Preissenkungen |
+| `GET /api/watches` | – | Watchlist-Einträge |
+| `GET /api/watches/check` | – | `{"hits": bool, "watches": [...]}` |
+| `GET /api/list` | – | Einkaufsliste |
+| `GET /api/list/suggest` | – | Günstigster Markt je Listen-Artikel |
 
 Fehler kommen als JSON (`{"error": "..."}`) mit 400 (fehlender/ungültiger
 Parameter) bzw. 500. Beispiel für ein Dashboard-Polling:
 
 ```sh
-curl -s "http://localhost:8080/watches/check" | jq '.hits'
+curl -s "http://localhost:8080/api/watches/check" | jq '.hits'
 ```
 
 Die API bindet an `0.0.0.0` und hat **keine Authentifizierung** — im
