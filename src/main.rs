@@ -12,6 +12,12 @@ struct Cli {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
+enum ExportFormat {
+    Json,
+    Csv,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
 enum Store {
     Rewe,
     Penny,
@@ -73,6 +79,24 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// Gespeicherte Angebote als JSON oder CSV exportieren
+    Export {
+        /// Ausgabeformat
+        #[arg(long, value_enum, default_value_t = ExportFormat::Json)]
+        format: ExportFormat,
+
+        /// Nur Angebote, deren Titel/Untertitel den Suchbegriff enthält
+        #[arg(long)]
+        query: Option<String>,
+
+        /// In Datei schreiben statt auf stdout
+        #[arg(long)]
+        out: Option<String>,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
     /// Preisverlauf eines Produkts anzeigen
     History {
         /// Suchbegriff (Teilstring des Titels)
@@ -95,6 +119,7 @@ fn main() -> Result<()> {
         }
         Command::Search { query, max_price, db } => search(query, max_price, db),
         Command::Compare { query, db } => compare(query, db),
+        Command::Export { format, query, out, db } => export(format, query, out, db),
         Command::History { query, db } => history(query, db),
     }
 }
@@ -309,6 +334,62 @@ fn compare(query: String, db: String) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn export(format: ExportFormat, query: Option<String>, out: Option<String>, db: String) -> Result<()> {
+    let conn = db::open(&db)?;
+    let offers = db::export_offers(&conn, query.as_deref())?;
+
+    let content = match format {
+        ExportFormat::Json => serde_json::to_string_pretty(&offers)?,
+        ExportFormat::Csv => offers_to_csv(&offers),
+    };
+
+    match out {
+        Some(path) => {
+            std::fs::write(&path, &content)?;
+            eprintln!("{} Angebote nach '{}' exportiert.", offers.len(), path);
+        }
+        None => println!("{content}"),
+    }
+    Ok(())
+}
+
+fn csv_escape(field: &str) -> String {
+    if field.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_string()
+    }
+}
+
+fn offers_to_csv(offers: &[Offer]) -> String {
+    let mut out = String::from(
+        "id,market_id,title,subtitle,overline,price,regular_price,category,nutri_score,valid_from,valid_until,images,biozid,flyer_page\n",
+    );
+    for o in offers {
+        let opt = |v: &Option<String>| csv_escape(v.as_deref().unwrap_or(""));
+        let num = |v: Option<f64>| v.map(|p| format!("{p:.2}")).unwrap_or_default();
+        let row = [
+            csv_escape(&o.id),
+            csv_escape(&o.market_id),
+            csv_escape(&o.title),
+            opt(&o.subtitle),
+            opt(&o.overline),
+            num(o.price),
+            num(o.regular_price),
+            opt(&o.category),
+            opt(&o.nutri_score),
+            opt(&o.valid_from),
+            opt(&o.valid_until),
+            csv_escape(&o.images.join(" ")),
+            (o.biozid as i64).to_string(),
+            o.flyer_page.map(|p| p.to_string()).unwrap_or_default(),
+        ];
+        out.push_str(&row.join(","));
+        out.push('\n');
+    }
+    out
 }
 
 fn format_offer(offer: &Offer) -> String {

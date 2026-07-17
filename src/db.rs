@@ -137,6 +137,19 @@ pub fn search_offers_broad(conn: &Connection, query: &str) -> Result<Vec<Offer>>
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
+// Alle Angebote, optional auf einen Suchbegriff (Titel/Untertitel) gefiltert.
+pub fn export_offers(conn: &Connection, query: Option<&str>) -> Result<Vec<Offer>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, market_id, title, subtitle, overline, price, regular_price,
+                category, nutri_score, valid_from, valid_until, images, biozid, flyer_page
+         FROM offers
+         WHERE ?1 IS NULL OR title LIKE '%' || ?1 || '%' OR subtitle LIKE '%' || ?1 || '%'
+         ORDER BY market_id, title",
+    )?;
+    let rows = stmt.query_map(params![query], row_to_offer)?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 fn row_to_offer(row: &rusqlite::Row) -> rusqlite::Result<Offer> {
     let images_json: String = row.get(11)?;
     Ok(Offer {
