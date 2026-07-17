@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::{HashMap, HashSet};
 
 use crate::models::{Market, Offer};
-use crate::scrapers::util;
+use crate::scrapers::{store_finder, util};
 
 // ALDI Nord über aldi-nord.de (Next.js/Magnolia, server-seitig gerendert).
 //
@@ -19,8 +19,14 @@ use crate::scrapers::util;
 
 const OFFERS_URL: &str = "https://www.aldi-nord.de/angebote.html";
 
-pub fn find_market(_zip: &str) -> Result<Market> {
-    Ok(Market { id: "ALDI_NORD_DE".to_string(), name: "ALDI Nord Deutschland".to_string() })
+/// Echte Filiale über den Store-Finder; None ohne Filiale im Umkreis der PLZ.
+/// Angebote bleiben der nationale Katalog (siehe store_finder.rs).
+pub fn find_market(zip: &str) -> Result<Option<Market>> {
+    Ok(store_finder::resolve("ALDI Nord", store_finder::aldi_nord_branch(zip), national()))
+}
+
+fn national() -> Market {
+    Market::new("ALDI_NORD_DE", "ALDI Nord Deutschland")
 }
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
@@ -223,7 +229,7 @@ mod tests {
     #[test]
     #[ignore = "Live-Test gegen aldi-nord.de"]
     fn live_fetch_offers() {
-        let market = find_market("10115").expect("Markt");
+        let market = find_market("10115").expect("Markt").expect("Filiale");
         println!("Markt: {} ({})", market.name, market.id);
 
         let offers = fetch_offers(&market).expect("Angebote");

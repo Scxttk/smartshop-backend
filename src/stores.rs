@@ -56,17 +56,33 @@ impl Store {
     }
 }
 
-pub fn scrape_store(store: Store, zip: &str, cert: &str, key: &str) -> Result<(Market, Vec<Offer>)> {
+/// None: die Kette hat laut Store-Finder keine Filiale im Umkreis der PLZ
+/// (nur bei Lidl/ALDI möglich — die übrigen Finder scheitern dann mit Err).
+pub fn scrape_store(
+    store: Store,
+    zip: &str,
+    cert: &str,
+    key: &str,
+) -> Result<Option<(Market, Vec<Offer>)>> {
     println!("Suche {}-Markt für PLZ {zip}...", store.label());
     let market = match store {
         Store::Rewe => scrapers::rewe::find_market(zip, cert, key)?,
         Store::Penny => scrapers::penny::find_market(zip)?,
         Store::Kaufland => scrapers::kaufland::find_market(zip)?,
-        Store::Lidl => scrapers::lidl::find_market(zip)?,
         Store::Netto => scrapers::netto::find_market(zip)?,
-        Store::AldiNord => scrapers::aldi_nord::find_market(zip)?,
-        Store::AldiSued => scrapers::aldi_sued::find_market(zip)?,
         Store::Edeka => scrapers::edeka::find_market(zip)?,
+        Store::Lidl => match scrapers::lidl::find_market(zip)? {
+            Some(m) => m,
+            None => return Ok(None),
+        },
+        Store::AldiNord => match scrapers::aldi_nord::find_market(zip)? {
+            Some(m) => m,
+            None => return Ok(None),
+        },
+        Store::AldiSued => match scrapers::aldi_sued::find_market(zip)? {
+            Some(m) => m,
+            None => return Ok(None),
+        },
     };
     println!("Markt gefunden: {} (ID: {})", market.name, market.id);
     println!("Lade Angebote...");
@@ -80,7 +96,7 @@ pub fn scrape_store(store: Store, zip: &str, cert: &str, key: &str) -> Result<(M
         Store::AldiSued => scrapers::aldi_sued::fetch_offers(&market)?,
         Store::Edeka => scrapers::edeka::fetch_offers(&market)?,
     };
-    Ok((market, offers))
+    Ok(Some((market, offers)))
 }
 
 pub fn save_offers(db: &str, market: &Market, offers: &[Offer]) -> Result<()> {
