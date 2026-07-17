@@ -385,12 +385,13 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
         }
 
         // Veraltete Wochen dieses Markts löschen — nur wenn neue Daten mit
-        // Gültigkeitsdatum vorliegen.
+        // Gültigkeitsdatum vorliegen. Legacy-Zeilen ohne valid_from (alte
+        // Scraper-Läufe) matchen `lt.` nie und müssen explizit mit weg.
         if let Some(current) = rows.iter().filter_map(|r| r.valid_from.as_deref()).max() {
             let resp = auth(client.delete(&offers_url))
                 .query(&[
                     ("market", format!("eq.{chain}")),
-                    ("valid_from", format!("lt.{current}")),
+                    ("or", format!("(valid_from.lt.{current},valid_from.is.null)")),
                 ])
                 .send()
                 .with_context(|| format!("Supabase nicht erreichbar ({})", cfg.base_url))?;

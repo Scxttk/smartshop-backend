@@ -325,7 +325,14 @@ fn push_batches_deletes_and_upserts() {
     assert_eq!(del.method, "DELETE");
     assert!(del.target.starts_with("/rest/v1/offers?"), "{}", del.target);
     assert!(del.target.contains("market=eq.REWE"), "{}", del.target);
-    assert!(del.target.contains("valid_from=lt.2026-07-13"), "{}", del.target);
+    // Löscht alte Wochen UND Legacy-Zeilen ohne valid_from (URL-encodiert:
+    // or=(valid_from.lt.2026-07-13,valid_from.is.null))
+    let decoded = del.target.replace("%28", "(").replace("%29", ")").replace("%2C", ",");
+    assert!(
+        decoded.contains("or=(valid_from.lt.2026-07-13,valid_from.is.null)"),
+        "{}",
+        del.target
+    );
     assert_eq!(del.header("apikey"), Some("test-key"));
     assert_eq!(del.header("authorization"), Some("Bearer test-key"));
 
