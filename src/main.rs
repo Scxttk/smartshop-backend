@@ -28,8 +28,12 @@ enum Command {
         zip: String,
 
         /// Supermarkt
-        #[arg(long, value_enum, default_value_t = Store::Rewe)]
+        #[arg(long, value_enum, default_value_t = Store::Rewe, conflicts_with = "all_stores")]
         store: Store,
+
+        /// Alle Supermärkte nacheinander abrufen
+        #[arg(long, default_value_t = false)]
+        all_stores: bool,
 
         /// Pfad zum Rewe TLS-Zertifikat (PEM)
         #[arg(long, default_value = "cert.pem")]
@@ -82,8 +86,12 @@ enum Command {
 
 fn main() -> Result<()> {
     match Cli::parse().command {
-        Command::Fetch { zip, store, cert, key, dry_run, db } => {
-            fetch(zip, store, cert, key, dry_run, db)
+        Command::Fetch { zip, store, all_stores, cert, key, dry_run, db } => {
+            if all_stores {
+                fetch_all(zip, cert, key, dry_run, db)
+            } else {
+                fetch(zip, store, cert, key, dry_run, db)
+            }
         }
         Command::Search { query, max_price, db } => search(query, max_price, db),
         Command::Compare { query, db } => compare(query, db),
@@ -110,40 +118,103 @@ fn history(query: String, db: String) -> Result<()> {
     Ok(())
 }
 
-fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db: String) -> Result<()> {
-    let (market, offers) = match store {
-        Store::Rewe => {
-            println!("Suche Rewe-Markt für PLZ {zip}...");
-            let market = scrapers::rewe::find_market(&zip, &cert, &key)?;
-            println!("Markt gefunden: {} (ID: {})", market.name, market.id);
-            println!("Lade Angebote...");
-            let offers = scrapers::rewe::fetch_offers(&market, &cert, &key)?;
-            (market, offers)
+impl Store {
+    const ALL: [Store; 4] = [Store::Rewe, Store::Penny, Store::Kaufland, Store::Lidl];
+
+    fn label(&self) -> &'static str {
+        match self {
+            Store::Rewe => "Rewe",
+            Store::Penny => "Penny",
+            Store::Kaufland => "Kaufland",
+            Store::Lidl => "Lidl",
         }
-        Store::Penny => {
-            println!("Suche Penny-Markt für PLZ {zip}...");
-            let market = scrapers::penny::find_market(&zip)?;
-            println!("Markt gefunden: {} (ID: {})", market.name, market.id);
-            println!("Lade Angebote...");
-            let offers = scrapers::penny::fetch_offers(&market)?;
-            (market, offers)
-        }
-        Store::Kaufland => {
-            println!("Suche Kaufland-Markt für PLZ {zip}...");
-            let market = scrapers::kaufland::find_market(&zip)?;
-            println!("Markt gefunden: {} (ID: {})", market.name, market.id);
-            println!("Lade Angebote...");
-            let offers = scrapers::kaufland::fetch_offers(&market)?;
-            (market, offers)
-        }
-        Store::Lidl => {
-            let market = scrapers::lidl::find_market(&zip)?;
-            println!("Markt: {} (ID: {})", market.name, market.id);
-            println!("Lade Angebote...");
-            let offers = scrapers::lidl::fetch_offers(&market)?;
-            (market, offers)
-        }
+    }
+}
+
+fn scrape_store(store: Store, zip: &str, cert: &str, key: &str) -> Result<(smartshop::models::Market, Vec<Offer>)> {
+    println!("Suche {}-Markt für PLZ {zip}...", store.label());
+    let market = match store {
+        Store::Rewe => scrapers::rewe::find_market(zip, cert, key)?,
+        Store::Penny => scrapers::penny::find_market(zip)?,
+        Store::Kaufland => scrapers::kaufland::find_market(zip)?,
+        Store::Lidl => scrapers::lidl::find_market(zip)?,
     };
+    println!("Markt gefunden: {} (ID: {})", market.name, market.id);
+    println!("Lade Angebote...");
+    let offers = match store {
+        Store::Rewe => scrapers::rewe::fetch_offers(&market, cert, key)?,
+        Store::Penny => scrapers::penny::fetch_offers(&market)?,
+        Store::Kaufland => scrapers::kaufland::fetch_offers(&market)?,
+        Store::Lidl => scrapers::lidl::fetch_offers(&market)?,
+    };
+    Ok((market, offers))
+}
+
+fn fetch_all(zip: String, cert: String, key: String, dry_run: bool, db: String) -> Result<()> {
+    struct Row {
+        store: &'static str,
+        market: String,
+        result: std::result::Result<usize, String>,
+    }
+    let mut rows = Vec::new();
+
+    for store in Store::ALL {
+        match scrape_store(store, &zip, &cert, &key) {
+            Ok((market, offers)) => {
+                let count = offers.len();
+                println!("{} Angebote gefunden.", count);
+                if dry_run {
+                    for offer in &offers {
+                        println!("  {}", format_offer(offer));
+                    }
+                    rows.push(Row { store: store.label(), market: market.name, result: Ok(count) });
+                } else {
+                    match save_offers(&db, &market, &offers) {
+                        Ok(()) => {
+                            println!("{count} Angebote in '{db}' gespeichert.");
+                            rows.push(Row { store: store.label(), market: market.name, result: Ok(count) });
+                        }
+                        Err(e) => {
+                            eprintln!("{}: Speichern fehlgeschlagen: {e:#}", store.label());
+                            rows.push(Row { store: store.label(), market: market.name, result: Err(format!("{e:#}")) });
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{}: Fehler: {e:#}", store.label());
+                rows.push(Row { store: store.label(), market: "-".to_string(), result: Err(format!("{e:#}")) });
+            }
+        }
+        println!();
+    }
+
+    println!("Zusammenfassung:");
+    println!("  {:<10} {:<28} {}", "Markt", "Filiale", "Ergebnis");
+    for row in &rows {
+        let result = match &row.result {
+            Ok(n) => format!("{n} Angebote"),
+            Err(e) => {
+                let first = e.lines().next().unwrap_or("Fehler");
+                format!("FEHLER: {first}")
+            }
+        };
+        println!("  {:<10} {:<28} {}", row.store, row.market, result);
+    }
+    Ok(())
+}
+
+fn save_offers(db: &str, market: &smartshop::models::Market, offers: &[Offer]) -> Result<()> {
+    let conn = db::open(db)?;
+    db::upsert_market(&conn, market)?;
+    for offer in offers {
+        db::upsert_offer(&conn, offer)?;
+    }
+    Ok(())
+}
+
+fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db: String) -> Result<()> {
+    let (market, offers) = scrape_store(store, &zip, &cert, &key)?;
     println!("{} Angebote gefunden.", offers.len());
 
     if dry_run {
@@ -151,11 +222,7 @@ fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db
             println!("  {}", format_offer(offer));
         }
     } else {
-        let conn = db::open(&db)?;
-        db::upsert_market(&conn, &market)?;
-        for offer in &offers {
-            db::upsert_offer(&conn, offer)?;
-        }
+        save_offers(&db, &market, &offers)?;
         println!("{} Angebote in '{}' gespeichert.", offers.len(), db);
     }
 
