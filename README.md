@@ -164,6 +164,24 @@ Watchlist-Check in einem Rutsch; auf macOS installiert
 `scripts/install-launchd.sh` den fertigen Nacht-Agent — siehe
 [docs/automation.md](docs/automation.md).
 
+Beim Push wird jedes Angebot deterministisch angereichert (`src/enrich.rs`):
+`category` enthält eine von 15 festen Kategorien (statt der rohen
+Scraper-Kategorie), `emoji` ein passendes Emoji aus einer kuratierten
+Keyword-Tabelle — ohne Treffer das Standard-Emoji der Kategorie, nie null.
+Die App hardcodet diese Liste; Änderungen nur zusammen mit einem App-Update
+(Regressionstest in `tests/enrich.rs`).
+
+| Kategorie | Default-Emoji | | Kategorie | Default-Emoji |
+|---|---|---|---|---|
+| Obst & Gemüse | 🥬 | | Alkohol | 🍺 |
+| Molkerei & Eier | 🥛 | | Vorräte & Kochen | 🥫 |
+| Fleisch & Wurst | 🥩 | | Drogerie | 🧴 |
+| Fisch | 🐟 | | Haushalt | 🧽 |
+| Backwaren | 🥖 | | Tierbedarf | 🐾 |
+| Tiefkühl | ❄️ | | Kinder | 🧸 |
+| Süßes & Snacks | 🍬 | | Sonstiges | 🛒 |
+| Getränke | 🥤 | | | |
+
 ### sync-regions — Multi-Region-Sync
 
 Liest alle aktiven Regionen aus der Supabase-Tabelle `public.regions`
