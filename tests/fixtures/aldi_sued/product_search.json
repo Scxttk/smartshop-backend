@@ -1,0 +1,277 @@
+{
+ "meta": {
+  "pagination": {
+   "totalCount": 4
+  }
+ },
+ "data": [
+  {
+   "sku": "000000000000230566",
+   "name": "Äpfel Krumme Dinger 2 kg",
+   "brandName": "NATUR LIEBLINGE",
+   "urlSlugText": "natur-lieblinge-aepfel-krumme-dinger-2-kg",
+   "urlSlugTextAlternatives": [],
+   "ageRestriction": null,
+   "alcohol": null,
+   "discontinued": false,
+   "discontinuedNote": null,
+   "notForSale": true,
+   "notForSaleReason": null,
+   "quantityMin": 1,
+   "quantityMax": 99,
+   "quantityInterval": 1,
+   "quantityDefault": 1,
+   "quantityUnit": "ea",
+   "weightType": "0",
+   "sellingSize": "2 kg",
+   "energyClass": null,
+   "onSaleDateDisplay": null,
+   "isAbstract": false,
+   "abstractSku": "000000000000230566A",
+   "price": {
+    "amount": 189,
+    "amountRelevant": 189,
+    "amountRelevantDisplay": "1,89 €",
+    "bottleDeposit": 0,
+    "bottleDepositDisplay": "0,00 €",
+    "comparison": 95,
+    "comparisonDisplay": "0,95 €/1 kg",
+    "currencyCode": "EUR",
+    "currencySymbol": "€",
+    "perUnit": null,
+    "perUnitDisplay": null,
+    "wasPriceDisplay": null,
+    "additionalInfo": null,
+    "savingsDisplay": null,
+    "bottleDepositType": null,
+    "feeText": null
+   },
+   "countryExtensions": null,
+   "categories": [
+    {
+     "id": "1588161426582123",
+     "name": "Wochenangebote",
+     "urlSlugText": "wochenangebote"
+    },
+    {
+     "id": "1588161427299187",
+     "name": "Frischeprodukte im Angebot",
+     "urlSlugText": "wochenangebote/frischeprodukte-im-angebot"
+    }
+   ],
+   "assets": [
+    {
+     "url": "https://dm.emea.cms.aldi.cx/is/image/aldiprodeu/product/jpg/scaleWidth/{width}/ca9c725f-8fd7-4ac6-8ef9-97e72a2edf91/{slug}",
+     "maxWidth": 1500,
+     "maxHeight": 1500,
+     "mimeType": "image/*",
+     "assetType": "FR01",
+     "alt": null,
+     "displayName": null
+    }
+   ],
+   "badges": []
+  },
+  {
+   "sku": "000000000000228796",
+   "name": "Trauben dunkel kernlos 500 g",
+   "brandName": "NATUR LIEBLINGE",
+   "urlSlugText": "natur-lieblinge-trauben-dunkel-kernlos-500-g",
+   "urlSlugTextAlternatives": [],
+   "ageRestriction": null,
+   "alcohol": null,
+   "discontinued": false,
+   "discontinuedNote": null,
+   "notForSale": true,
+   "notForSaleReason": null,
+   "quantityMin": 1,
+   "quantityMax": 99,
+   "quantityInterval": 1,
+   "quantityDefault": 1,
+   "quantityUnit": "ea",
+   "weightType": "0",
+   "sellingSize": "0,5 kg",
+   "energyClass": null,
+   "onSaleDateDisplay": null,
+   "isAbstract": false,
+   "abstractSku": "000000000000228796A",
+   "price": {
+    "amount": 169,
+    "amountRelevant": 169,
+    "amountRelevantDisplay": "1,69 €",
+    "bottleDeposit": 0,
+    "bottleDepositDisplay": "0,00 €",
+    "comparison": 338,
+    "comparisonDisplay": "3,38 €/1 kg",
+    "currencyCode": "EUR",
+    "currencySymbol": "€",
+    "perUnit": null,
+    "perUnitDisplay": null,
+    "wasPriceDisplay": null,
+    "additionalInfo": null,
+    "savingsDisplay": null,
+    "bottleDepositType": null,
+    "feeText": null
+   },
+   "countryExtensions": null,
+   "categories": [
+    {
+     "id": "1588161426582123",
+     "name": "Wochenangebote",
+     "urlSlugText": "wochenangebote"
+    },
+    {
+     "id": "1588161427299187",
+     "name": "Frischeprodukte im Angebot",
+     "urlSlugText": "wochenangebote/frischeprodukte-im-angebot"
+    }
+   ],
+   "assets": [
+    {
+     "url": "https://dm.emea.cms.aldi.cx/is/image/aldiprodeu/product/jpg/scaleWidth/{width}/6ce51e09-1abc-49e2-b820-6f957545d80b/{slug}",
+     "maxWidth": 1500,
+     "maxHeight": 1500,
+     "mimeType": "image/*",
+     "assetType": "FR01",
+     "alt": null,
+     "displayName": null
+    }
+   ],
+   "badges": []
+  },
+  {
+   "sku": "000000000000229256",
+   "name": "Heidelbeeren 500 g",
+   "brandName": "NATUR LIEBLINGE",
+   "urlSlugText": "natur-lieblinge-heidelbeeren-500-g",
+   "urlSlugTextAlternatives": [],
+   "ageRestriction": null,
+   "alcohol": null,
+   "discontinued": false,
+   "discontinuedNote": null,
+   "notForSale": true,
+   "notForSaleReason": null,
+   "quantityMin": 1,
+   "quantityMax": 99,
+   "quantityInterval": 1,
+   "quantityDefault": 1,
+   "quantityUnit": "ea",
+   "weightType": "0",
+   "sellingSize": "0,5 kg",
+   "energyClass": null,
+   "onSaleDateDisplay": null,
+   "isAbstract": false,
+   "abstractSku": "000000000000229256A",
+   "price": {
+    "amount": 329,
+    "amountRelevant": 329,
+    "amountRelevantDisplay": "3,29 €",
+    "bottleDeposit": 0,
+    "bottleDepositDisplay": "0,00 €",
+    "comparison": 658,
+    "comparisonDisplay": "6,58 €/1 kg",
+    "currencyCode": "EUR",
+    "currencySymbol": "€",
+    "perUnit": null,
+    "perUnitDisplay": null,
+    "wasPriceDisplay": null,
+    "additionalInfo": null,
+    "savingsDisplay": null,
+    "bottleDepositType": null,
+    "feeText": null
+   },
+   "countryExtensions": null,
+   "categories": [
+    {
+     "id": "1588161426582123",
+     "name": "Wochenangebote",
+     "urlSlugText": "wochenangebote"
+    },
+    {
+     "id": "1588161427299187",
+     "name": "Frischeprodukte im Angebot",
+     "urlSlugText": "wochenangebote/frischeprodukte-im-angebot"
+    }
+   ],
+   "assets": [
+    {
+     "url": "https://dm.emea.cms.aldi.cx/is/image/aldiprodeu/product/jpg/scaleWidth/{width}/1600316a-d720-4d91-9a0c-18a62f13a04a/{slug}",
+     "maxWidth": 1500,
+     "maxHeight": 1500,
+     "mimeType": "image/*",
+     "assetType": "FR01",
+     "alt": null,
+     "displayName": null
+    }
+   ],
+   "badges": []
+  },
+  {
+   "sku": "000000000000229496",
+   "name": "Plattnektarinen 500 g",
+   "brandName": "NATUR LIEBLINGE",
+   "urlSlugText": "natur-lieblinge-plattnektarinen-500-g",
+   "urlSlugTextAlternatives": [],
+   "ageRestriction": null,
+   "alcohol": null,
+   "discontinued": false,
+   "discontinuedNote": null,
+   "notForSale": true,
+   "notForSaleReason": null,
+   "quantityMin": 1,
+   "quantityMax": 99,
+   "quantityInterval": 1,
+   "quantityDefault": 1,
+   "quantityUnit": "ea",
+   "weightType": "0",
+   "sellingSize": "0,5 kg",
+   "energyClass": null,
+   "onSaleDateDisplay": null,
+   "isAbstract": false,
+   "abstractSku": "000000000000229496A",
+   "price": {
+    "amount": 199,
+    "amountRelevant": 199,
+    "amountRelevantDisplay": "1,99 €",
+    "bottleDeposit": 0,
+    "bottleDepositDisplay": "0,00 €",
+    "comparison": 398,
+    "comparisonDisplay": "3,98 €/1 kg",
+    "currencyCode": "EUR",
+    "currencySymbol": "€",
+    "perUnit": null,
+    "perUnitDisplay": null,
+    "wasPriceDisplay": null,
+    "additionalInfo": null,
+    "savingsDisplay": null,
+    "bottleDepositType": null,
+    "feeText": null
+   },
+   "countryExtensions": null,
+   "categories": [
+    {
+     "id": "1588161426582123",
+     "name": "Wochenangebote",
+     "urlSlugText": "wochenangebote"
+    },
+    {
+     "id": "1588161427299187",
+     "name": "Frischeprodukte im Angebot",
+     "urlSlugText": "wochenangebote/frischeprodukte-im-angebot"
+    }
+   ],
+   "assets": [
+    {
+     "url": "https://dm.emea.cms.aldi.cx/is/image/aldiprodeu/product/jpg/scaleWidth/{width}/6eab0823-e5fb-4671-93df-1b9c56f26ee0/{slug}",
+     "maxWidth": 1500,
+     "maxHeight": 1500,
+     "mimeType": "image/*",
+     "assetType": "FR01",
+     "alt": null,
+     "displayName": null
+    }
+   ],
+   "badges": []
+  }
+ ]
+}

@@ -5,6 +5,75 @@
 
 use smartshop::scrapers;
 
+// ---------------------------------------------------------------- Netto
+
+#[test]
+fn netto_fixture_parses_tiles_with_period() {
+    let mut offers = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    smartshop::scrapers::netto::parse_page(
+        include_str!("fixtures/netto/filialangebote_1.html"),
+        "4816",
+        &mut offers,
+        &mut seen,
+    );
+    assert_eq!(offers.len(), 4);
+
+    let eis = &offers[0];
+    assert_eq!(eis.title, "Langnese Cremissimo Eis");
+    assert_eq!(eis.price, Some(1.79));
+    assert_eq!(eis.regular_price, Some(3.99));
+    assert_eq!(eis.category.as_deref(), Some("Wochenangebote"));
+    assert_eq!(eis.valid_from.as_deref(), Some("2026-07-13"));
+    assert_eq!(eis.valid_until.as_deref(), Some("2026-07-18"));
+
+    let kirschen = offers.iter().find(|o| o.title == "Kirschen").unwrap();
+    assert_eq!(kirschen.price, Some(0.39));
+    assert_eq!(kirschen.subtitle.as_deref(), Some("100 g"));
+}
+
+// ---------------------------------------------------------------- ALDI Nord
+
+#[test]
+fn aldi_nord_fixture_parses_next_data() {
+    let offers = smartshop::scrapers::aldi_nord::parse_offers(
+        include_str!("fixtures/aldi_nord/angebote.html"),
+        "ALDI_NORD_DE",
+    )
+    .unwrap();
+    assert_eq!(offers.len(), 3);
+
+    let avocado = offers.iter().find(|o| o.title == "Avocado").unwrap();
+    assert_eq!(avocado.price, Some(0.66));
+    assert_eq!(avocado.regular_price, Some(0.79));
+    assert_eq!(avocado.subtitle.as_deref(), Some("Stück"));
+    assert_eq!(avocado.category.as_deref(), Some("Frische-Aktion: Obst & Gemüse"));
+    assert_eq!(avocado.valid_from.as_deref(), Some("2026-07-13"));
+    assert_eq!(avocado.valid_until.as_deref(), Some("2026-07-18"));
+}
+
+// ---------------------------------------------------------------- ALDI Süd
+
+#[test]
+fn aldi_sued_fixture_parses_products_with_cent_prices() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/aldi_sued/product_search.json")).unwrap();
+    let items = raw["data"].as_array().unwrap();
+    assert_eq!(items.len(), 4);
+
+    let offers: Vec<_> = items
+        .iter()
+        .filter_map(|it| smartshop::scrapers::aldi_sued::parse_product(it, "ALDI_SUED_DE"))
+        .collect();
+    assert_eq!(offers.len(), 4);
+
+    // Preise kommen in Cent: 189 -> 1.89 €
+    let aepfel = &offers[0];
+    assert_eq!(aepfel.title, "Äpfel Krumme Dinger 2 kg");
+    assert_eq!(aepfel.price, Some(1.89));
+    assert_eq!(aepfel.subtitle.as_deref(), Some("2 kg"));
+}
+
 // ---------------------------------------------------------------- Kaufland
 
 #[test]

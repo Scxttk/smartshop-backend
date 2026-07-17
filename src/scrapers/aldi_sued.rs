@@ -86,7 +86,7 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
 }
 
 // Ein Produkt der Suche defensiv in ein Offer übersetzen.
-fn parse_product(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
+pub fn parse_product(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
     let title = item
         .get("name")
         .and_then(|v| v.as_str())
