@@ -18,6 +18,7 @@ struct Cli {
 enum Store {
     Rewe,
     Penny,
+    Kaufland,
 }
 
 #[derive(Subcommand)]
@@ -117,6 +118,14 @@ fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db
             println!("Markt gefunden: {} (ID: {})", market.name, market.id);
             println!("Lade Angebote...");
             let offers = scrapers::penny::fetch_offers(&market)?;
+            (market, offers)
+        }
+        Store::Kaufland => {
+            println!("Suche Kaufland-Markt für PLZ {zip}...");
+            let market = scrapers::kaufland::find_market(&zip)?;
+            println!("Markt gefunden: {} (ID: {})", market.name, market.id);
+            println!("Lade Angebote...");
+            let offers = scrapers::kaufland::fetch_offers(&market)?;
             (market, offers)
         }
     };
