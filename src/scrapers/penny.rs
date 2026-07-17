@@ -274,9 +274,11 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 mod tests {
     use super::*;
 
+    /// Live-Test gegen penny.de: cargo test penny -- --ignored --nocapture
     #[test]
+    #[ignore = "Live-Test gegen penny.de"]
     fn live_fetch_offers_for_example_zip() {
-        let market = find_market("10115").expect("Markt für 10115");
+        let market = find_market("01219").expect("Markt für 01219");
         println!("Markt: {} ({})", market.name, market.id);
 
         let offers = fetch_offers(&market).expect("Angebote");

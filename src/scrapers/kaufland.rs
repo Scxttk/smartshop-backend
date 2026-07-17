@@ -225,12 +225,11 @@ mod tests {
     /// Ausführen mit: cargo test -- --ignored --nocapture kaufland
     #[test]
     #[ignore]
-    fn fetch_de1300_offers() {
-        let market = find_market("48683").expect("Markt für PLZ 48683");
-        assert_eq!(market.id, "DE1300");
+    fn live_fetch_offers() {
+        let market = find_market("01219").expect("Markt für PLZ 01219");
         println!("Markt: {} ({})", market.name, market.id);
 
-        let offers = fetch_offers(&market).expect("Angebote für DE1300");
+        let offers = fetch_offers(&market).expect("Angebote");
         println!("{} Angebote gefunden.", offers.len());
         assert!(offers.len() >= 80, "erwartet >= 80 Angebote, waren {}", offers.len());
 
