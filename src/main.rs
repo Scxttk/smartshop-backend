@@ -117,6 +117,16 @@ enum Command {
         #[command(subcommand)]
         action: ListAction,
     },
+    /// Preissenkungen anzeigen: Produkte, die günstiger geworden sind
+    Deals {
+        /// Nur Senkungen der letzten N Tage
+        #[arg(long)]
+        since: Option<i64>,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
     /// Preisverlauf eines Produkts anzeigen
     History {
         /// Suchbegriff (Teilstring des Titels)
@@ -225,6 +235,7 @@ fn main() -> Result<()> {
         Command::Stats { db } => stats(db),
         Command::Watch { action } => watch(action),
         Command::List { action } => shopping_list(action),
+        Command::Deals { since, db } => deals(since, db),
         Command::History { query, db } => history(query, db),
     }
 }
@@ -409,6 +420,38 @@ fn watch(action: WatchAction) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn deals(since: Option<i64>, db: String) -> Result<()> {
+    let conn = db::open(&db)?;
+    let drops = db::price_drops(&conn, since)?;
+    if drops.is_empty() {
+        let window = since.map(|d| format!(" in den letzten {d} Tagen")).unwrap_or_default();
+        println!("Keine Preissenkungen{window} gefunden.");
+        return Ok(());
+    }
+    let market_names: std::collections::HashMap<String, String> = db::markets(&conn)?
+        .into_iter()
+        .map(|m| (m.id, m.name))
+        .collect();
+    println!("Preissenkungen ({}):", drops.len());
+    for d in &drops {
+        let market = market_names
+            .get(&d.market_id)
+            .map(String::as_str)
+            .unwrap_or(d.market_id.as_str());
+        let pct = (1.0 - d.new_price / d.old_price) * 100.0;
+        println!(
+            "  -{:.2} € (-{pct:.0} %)  {} — {:.2} € statt {:.2} € ({market}, {} -> {})",
+            d.old_price - d.new_price,
+            d.title,
+            d.new_price,
+            d.old_price,
+            d.old_seen_at,
+            d.new_seen_at,
+        );
+    }
+    Ok(())
 }
 
 fn history(query: String, db: String) -> Result<()> {
