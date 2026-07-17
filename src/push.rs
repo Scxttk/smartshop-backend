@@ -112,7 +112,12 @@ pub fn map_offer(offer: &Offer, chain: &str, region: Option<&str>) -> Option<Sup
         product: product_name(offer),
         price,
         regular_price: offer.regular_price,
-        unit: "Stück".to_string(),
+        // Mengen-Untertitel ("je 12 x 1 l") wandert ins unit-Feld — sonst
+        // wirkt ein Multipack-Preis in der App wie ein Einzelpreis.
+        unit: match &offer.subtitle {
+            Some(s) if !s.is_empty() && is_pure_quantity(s) => s.clone(),
+            _ => "Stück".to_string(),
+        },
         category: offer.category.clone(),
         emoji: None,
         valid_from: offer.valid_from.clone(),
