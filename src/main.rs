@@ -23,6 +23,10 @@ enum Store {
     Penny,
     Kaufland,
     Lidl,
+    Netto,
+    AldiNord,
+    AldiSued,
+    Edeka,
 }
 
 #[derive(Subcommand)]
@@ -474,7 +478,16 @@ fn history(query: String, db: String) -> Result<()> {
 }
 
 impl Store {
-    const ALL: [Store; 4] = [Store::Rewe, Store::Penny, Store::Kaufland, Store::Lidl];
+    const ALL: [Store; 8] = [
+        Store::Rewe,
+        Store::Penny,
+        Store::Kaufland,
+        Store::Lidl,
+        Store::Netto,
+        Store::AldiNord,
+        Store::AldiSued,
+        Store::Edeka,
+    ];
 
     fn label(&self) -> &'static str {
         match self {
@@ -482,6 +495,10 @@ impl Store {
             Store::Penny => "Penny",
             Store::Kaufland => "Kaufland",
             Store::Lidl => "Lidl",
+            Store::Netto => "Netto",
+            Store::AldiNord => "Aldi Nord",
+            Store::AldiSued => "Aldi Süd",
+            Store::Edeka => "Edeka",
         }
     }
 }
@@ -493,6 +510,10 @@ fn scrape_store(store: Store, zip: &str, cert: &str, key: &str) -> Result<(smart
         Store::Penny => scrapers::penny::find_market(zip)?,
         Store::Kaufland => scrapers::kaufland::find_market(zip)?,
         Store::Lidl => scrapers::lidl::find_market(zip)?,
+        Store::Netto => scrapers::netto::find_market(zip)?,
+        Store::AldiNord => scrapers::aldi_nord::find_market(zip)?,
+        Store::AldiSued => scrapers::aldi_sued::find_market(zip)?,
+        Store::Edeka => scrapers::edeka::find_market(zip)?,
     };
     println!("Markt gefunden: {} (ID: {})", market.name, market.id);
     println!("Lade Angebote...");
@@ -501,6 +522,10 @@ fn scrape_store(store: Store, zip: &str, cert: &str, key: &str) -> Result<(smart
         Store::Penny => scrapers::penny::fetch_offers(&market)?,
         Store::Kaufland => scrapers::kaufland::fetch_offers(&market)?,
         Store::Lidl => scrapers::lidl::fetch_offers(&market)?,
+        Store::Netto => scrapers::netto::fetch_offers(&market)?,
+        Store::AldiNord => scrapers::aldi_nord::fetch_offers(&market)?,
+        Store::AldiSued => scrapers::aldi_sued::fetch_offers(&market)?,
+        Store::Edeka => scrapers::edeka::fetch_offers(&market)?,
     };
     Ok((market, offers))
 }
