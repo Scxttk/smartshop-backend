@@ -106,69 +106,92 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
                     Err(_) => continue,
                 };
 
-                let tiles = raw
-                    .get("offerTiles")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-
-                for tile in &tiles {
-                    let Some(title) = tile.get("title").and_then(|v| v.as_str()) else { continue };
-                    let title = title.to_string();
-
-                    // Kategorien überschneiden sich (z. B. top-angebote vs. food)
-                    if !seen.insert(title.to_lowercase()) {
-                        continue;
-                    }
-
-                    let subtitle = tile.get("quantity").and_then(|v| v.as_str()).map(String::from);
-                    let overline = tile
-                        .get("headline")
-                        .or_else(|| tile.get("actionMarker"))
-                        .and_then(|v| v.as_str())
-                        .map(String::from);
-
-                    let price = tile.get("price").and_then(json_price);
-                    let regular_price = tile
-                        .get("listPrice")
-                        .and_then(json_price)
-                        .or_else(|| tile.get("crossOutPrice").and_then(json_price))
-                        .or_else(|| tile.get("originalPrice").and_then(json_price));
-
-                    let images: Vec<String> = tile
-                        .get("imageRendition")
-                        .and_then(|r| {
-                            ["tileLg", "tileMd", "tileSm", "tileXs"]
-                                .iter()
-                                .find_map(|k| r.get(k).and_then(|v| v.as_str()))
-                        })
-                        .map(|s| vec![s.to_string()])
-                        .unwrap_or_default();
-
-                    let id = Offer::build_id(&market.id, &title, Some(&valid_from));
-
-                    offers.push(Offer {
-                        id,
-                        market_id: market.id.clone(),
-                        title,
-                        subtitle,
-                        overline,
-                        price,
-                        regular_price,
-                        category: Some(category.clone()),
-                        nutri_score: None,
-                        valid_from: Some(valid_from.clone()),
-                        valid_until: Some(valid_until.clone()),
-                        images,
-                        biozid: false,
-                        flyer_page: None,
-                    });
-                }
+                parse_offer_tiles(
+                    &raw,
+                    &market.id,
+                    category,
+                    &valid_from,
+                    &valid_until,
+                    &mut seen,
+                    &mut offers,
+                );
             }
         }
 
         Ok(offers)
     })
+}
+
+// Alle offerTiles einer Kategorie-Antwort in Offers übersetzen.
+// `seen` dedupliziert nach Titel über Kategorien hinweg (top-angebote
+// überschneidet sich mit den Themen-Kategorien).
+pub fn parse_offer_tiles(
+    raw: &serde_json::Value,
+    market_id: &str,
+    category: &str,
+    valid_from: &str,
+    valid_until: &str,
+    seen: &mut HashSet<String>,
+    offers: &mut Vec<Offer>,
+) {
+    let tiles = raw
+        .get("offerTiles")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    for tile in &tiles {
+        let Some(title) = tile.get("title").and_then(|v| v.as_str()) else { continue };
+        let title = title.to_string();
+
+        // Kategorien überschneiden sich (z. B. top-angebote vs. food)
+        if !seen.insert(title.to_lowercase()) {
+            continue;
+        }
+
+        let subtitle = tile.get("quantity").and_then(|v| v.as_str()).map(String::from);
+        let overline = tile
+            .get("headline")
+            .or_else(|| tile.get("actionMarker"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        let price = tile.get("price").and_then(json_price);
+        let regular_price = tile
+            .get("listPrice")
+            .and_then(json_price)
+            .or_else(|| tile.get("crossOutPrice").and_then(json_price))
+            .or_else(|| tile.get("originalPrice").and_then(json_price));
+
+        let images: Vec<String> = tile
+            .get("imageRendition")
+            .and_then(|r| {
+                ["tileLg", "tileMd", "tileSm", "tileXs"]
+                    .iter()
+                    .find_map(|k| r.get(k).and_then(|v| v.as_str()))
+            })
+            .map(|s| vec![s.to_string()])
+            .unwrap_or_default();
+
+        let id = Offer::build_id(market_id, &title, Some(valid_from));
+
+        offers.push(Offer {
+            id,
+            market_id: market_id.to_string(),
+            title,
+            subtitle,
+            overline,
+            price,
+            regular_price,
+            category: Some(category.to_string()),
+            nutri_score: None,
+            valid_from: Some(valid_from.to_string()),
+            valid_until: Some(valid_until.to_string()),
+            images,
+            biozid: false,
+            flyer_page: None,
+        });
+    }
 }
 
 fn build_client() -> Result<reqwest::Client> {
