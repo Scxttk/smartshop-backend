@@ -100,3 +100,40 @@ fn json_api_still_reachable_under_api_prefix() {
     let json: serde_json::Value = serde_json::from_str(&body).expect("JSON");
     assert_eq!(json.as_array().expect("Array").len(), 2);
 }
+
+#[test]
+fn search_lists_offers_cheapest_first_and_escapes_html() {
+    let dbf = fixture_db("search");
+    let addr = spawn_server(&dbf);
+
+    // Formular ohne q
+    let (status, body) = get(addr, "/search");
+    assert_eq!(status, 200);
+    assert!(body.contains("name=\"q\""), "body: {body}");
+
+    // Treffer, billigster zuerst
+    let (status, body) = get(addr, "/search?q=Butter");
+    assert_eq!(status, 200);
+    assert!(body.contains("2 Treffer"), "body: {body}");
+    let pos_cheap = body.find("1.39 €").expect("1.39 fehlt");
+    let pos_exp = body.find("1.59 €").expect("1.59 fehlt");
+    assert!(pos_cheap < pos_exp, "body: {body}");
+    assert!(body.contains("6.36 €/kg") || body.contains("5.56 €/kg"), "body: {body}");
+
+    // Kein Treffer
+    let (status, body) = get(addr, "/search?q=Raumschiff");
+    assert_eq!(status, 200);
+    assert!(body.contains("Keine Angebote für 'Raumschiff' gefunden."), "body: {body}");
+
+    // DB-Inhalt mit Sonderzeichen wird escaped
+    let (status, body) = get(addr, "/search?q=K%C3%A4se");
+    assert_eq!(status, 200);
+    assert!(body.contains("Käse &quot;Extra&quot;, gereift &lt;b&gt;"), "body: {body}");
+    assert!(!body.contains("gereift <b>"), "body: {body}");
+
+    // Reflektierte Nutzereingabe wird escaped
+    let (status, body) = get(addr, "/search?q=%3Cscript%3E");
+    assert_eq!(status, 200);
+    assert!(!body.contains("<script>"), "body: {body}");
+    assert!(body.contains("&lt;script&gt;"), "body: {body}");
+}
