@@ -131,6 +131,16 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// HTTP-API (nur lesend) für die gespeicherten Angebote starten
+    Serve {
+        /// Port für den HTTP-Server
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
     /// Preisverlauf eines Produkts anzeigen
     History {
         /// Suchbegriff (Teilstring des Titels)
@@ -240,6 +250,7 @@ fn main() -> Result<()> {
         Command::Watch { action } => watch(action),
         Command::List { action } => shopping_list(action),
         Command::Deals { since, db } => deals(since, db),
+        Command::Serve { port, db } => smartshop::api::serve(port, db),
         Command::History { query, db } => history(query, db),
     }
 }
