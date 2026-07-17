@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 
-use crate::scrapers::util::curl_get;
+use crate::scrapers::util::{self, curl_get};
 use scraper::{ElementRef, Html, Selector};
 use std::collections::HashSet;
 
@@ -42,10 +42,11 @@ pub fn find_market(zip: &str) -> Result<Market> {
             ("Sec-Fetch-Mode", "cors"),
             ("Sec-Fetch-Dest", "empty"),
         ],
-    )?;
+    )
+    .with_context(|| util::ctx("Netto", "Markt-Lookup", &url))?;
 
-    let stores: Vec<serde_json::Value> =
-        serde_json::from_str(&body).context("Netto-Filialsuche JSON parse fehlgeschlagen")?;
+    let stores: Vec<serde_json::Value> = serde_json::from_str(&body)
+        .with_context(|| util::ctx("Netto", "Markt-Lookup JSON parsen", &url))?;
 
     let store = stores
         .first()
@@ -94,7 +95,9 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
     }
 
     if offers.is_empty() {
-        bail!("Keine Netto-Angebote gefunden — Seitenstruktur hat sich möglicherweise geändert");
+        bail!(
+            "[Netto] Keine Angebote gefunden ({BASE}/filialangebote/…) — Seitenstruktur hat sich möglicherweise geändert"
+        );
     }
     Ok(offers)
 }

@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 
 use crate::models::{Market, Offer};
+use crate::scrapers::util;
 
 // Lidl-Angebote über die öffentliche Such-API des Onlineshops (kein Login nötig).
 //
@@ -19,7 +20,6 @@ use crate::models::{Market, Offer};
 // deshalb unabhängig von der PLZ einen synthetischen National-Markt.
 
 const SEARCH_URL: &str = "https://www.lidl.de/q/api/search";
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36";
 const PAGE_SIZE: usize = 200;
 const MAX_OFFERS: usize = 2000;
 
@@ -30,10 +30,7 @@ pub fn find_market(_zip: &str) -> Result<Market> {
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
     block_on(async {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .build()
-            .context("HTTP-Client konnte nicht erstellt werden")?;
+        let client = util::async_client()?;
 
         let mut offers = Vec::new();
         let mut seen = HashSet::new();
@@ -44,21 +41,22 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
                 "{SEARCH_URL}?assortment=DE&locale=de_DE&version=v2.0.0&store=1&fetchsize={PAGE_SIZE}&offset={offset}"
             );
 
+            util::polite_pause(&url);
             let resp = client
                 .get(&url)
                 .header("Accept", "application/json, text/plain, */*")
                 .send()
                 .await
-                .with_context(|| format!("Lidl-Such-API-Request fehlgeschlagen: {url}"))?;
+                .with_context(|| util::ctx("Lidl", "Angebote laden", &url))?;
 
             if !resp.status().is_success() {
-                bail!("Lidl-Such-API lieferte HTTP {} für {url}", resp.status());
+                bail!("[Lidl] Angebote laden lieferte HTTP {}: {url}", resp.status());
             }
 
             let raw: serde_json::Value = resp
                 .json()
                 .await
-                .context("Lidl-Such-API JSON parse fehlgeschlagen")?;
+                .with_context(|| util::ctx("Lidl", "Angebote JSON parsen", &url))?;
 
             let num_found = raw.get("numFound").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let items = raw

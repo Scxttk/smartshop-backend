@@ -3,6 +3,7 @@ use chrono::Datelike;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::models::{Market, Offer};
+use crate::scrapers::util;
 
 // Scraped von filiale.kaufland.de: der Store-Finder ist öffentliches JSON,
 // die Angebotsseite ist server-seitig gerendert. Die Filiale wird über das
@@ -10,24 +11,21 @@ use crate::models::{Market, Offer};
 
 const STORE_FINDER_URL: &str = "https://filiale.kaufland.de/.klstorefinder.json";
 const OFFERS_URL: &str = "https://filiale.kaufland.de/angebote/uebersicht.html";
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 fn client() -> Result<reqwest::blocking::Client> {
-    reqwest::blocking::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .context("HTTP-Client konnte nicht erstellt werden")
+    util::blocking_client()
 }
 
 pub fn find_market(zip: &str) -> Result<Market> {
+    util::polite_pause(STORE_FINDER_URL);
     let stores: Vec<serde_json::Value> = client()?
         .get(STORE_FINDER_URL)
         .send()
-        .context("Kaufland Store-Finder nicht erreichbar")?
+        .with_context(|| util::ctx("Kaufland", "Markt-Lookup", STORE_FINDER_URL))?
         .error_for_status()
-        .context("Kaufland Store-Finder lieferte einen Fehler")?
+        .with_context(|| util::ctx("Kaufland", "Markt-Lookup (HTTP-Status)", STORE_FINDER_URL))?
         .json()
-        .context("Kaufland Store-Finder JSON parse fehlgeschlagen")?;
+        .with_context(|| util::ctx("Kaufland", "Markt-Lookup JSON parsen", STORE_FINDER_URL))?;
 
     let store = stores
         .iter()
@@ -47,15 +45,16 @@ pub fn find_market(zip: &str) -> Result<Market> {
 }
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
+    util::polite_pause(OFFERS_URL);
     let html = client()?
         .get(OFFERS_URL)
         .header("Cookie", format!("x-aem-variant={}", market.id))
         .send()
-        .context("Kaufland Angebotsseite nicht erreichbar")?
+        .with_context(|| util::ctx("Kaufland", "Angebote laden", OFFERS_URL))?
         .error_for_status()
-        .context("Kaufland Angebotsseite lieferte einen Fehler")?
+        .with_context(|| util::ctx("Kaufland", "Angebote laden (HTTP-Status)", OFFERS_URL))?
         .text()
-        .context("Kaufland Angebotsseite konnte nicht gelesen werden")?;
+        .with_context(|| util::ctx("Kaufland", "Angebote lesen", OFFERS_URL))?;
 
     let offers = parse_offers(&html, &market.id)?;
     if offers.is_empty() {
