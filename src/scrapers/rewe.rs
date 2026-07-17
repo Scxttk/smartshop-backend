@@ -46,7 +46,7 @@ pub fn find_market(zip: &str, cert: &str, key: &str) -> Result<Market> {
         .and_then(|v| v.as_str())
         .unwrap_or("REWE");
 
-    Ok(Market { id: id.to_string(), name: name.to_string() })
+    Ok(Market::new(id, name))
 }
 
 pub fn fetch_offers(market: &Market, cert: &str, key: &str) -> Result<Vec<Offer>> {

@@ -65,7 +65,7 @@ pub fn find_market(zip: &str) -> Result<Market> {
         _ => "Netto Marken-Discount".to_string(),
     };
 
-    Ok(Market { id: id.to_string(), name })
+    Ok(Market::new(id, name))
 }
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {

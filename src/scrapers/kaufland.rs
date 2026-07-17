@@ -41,7 +41,9 @@ pub fn find_market(zip: &str) -> Result<Market> {
         .and_then(|v| v.as_str())
         .unwrap_or("Kaufland");
 
-    Ok(Market { id: id.to_string(), name: name.to_string() })
+    // Koordinaten kommen als Strings ("52.066…"); fehlend/kaputt -> None.
+    let coord = |k: &str| store.get(k).and_then(|v| v.as_str()).and_then(|s| s.parse().ok());
+    Ok(Market::new(id, name).with_geo(coord("lat"), coord("lng")))
 }
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
