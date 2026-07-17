@@ -2,7 +2,7 @@ mod db;
 mod models;
 mod scrapers;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::models::Offer;
@@ -112,8 +112,12 @@ fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db
             (market, offers)
         }
         Store::Penny => {
-            // Wird vom Penny-Scraper-Branch (feature/penny-scraper) angebunden.
-            bail!("Penny-Scraper ist noch nicht verfügbar.");
+            println!("Suche Penny-Markt für PLZ {zip}...");
+            let market = scrapers::penny::find_market(&zip)?;
+            println!("Markt gefunden: {} (ID: {})", market.name, market.id);
+            println!("Lade Angebote...");
+            let offers = scrapers::penny::fetch_offers(&market)?;
+            (market, offers)
         }
     };
     println!("{} Angebote gefunden.", offers.len());
