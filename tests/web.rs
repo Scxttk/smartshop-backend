@@ -137,3 +137,19 @@ fn search_lists_offers_cheapest_first_and_escapes_html() {
     assert!(!body.contains("<script>"), "body: {body}");
     assert!(body.contains("&lt;script&gt;"), "body: {body}");
 }
+
+#[test]
+fn compare_groups_products_cheapest_first() {
+    let dbf = fixture_db("compare");
+    let addr = spawn_server(&dbf);
+    let (status, body) = get(addr, "/compare?q=Butter");
+    assert_eq!(status, 200);
+    // Gruppenname genau einmal als Überschrift
+    assert_eq!(body.matches("<h2>").count(), 1, "body: {body}");
+    assert!(body.contains("MEGGLE Feine Butter"), "body: {body}");
+    // Billigerer Markt (M2, 1.39) vor teurerem (M1, 1.59)
+    let pos_m2 = body.find("Testmarkt Zwei").expect("M2 fehlt");
+    let pos_m1 = body.find("Testmarkt Eins").expect("M1 fehlt");
+    assert!(pos_m2 < pos_m1, "body: {body}");
+    assert!(body.contains("1.39 €") && body.contains("1.59 €"), "body: {body}");
+}
