@@ -141,6 +141,28 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// Gespeicherte Angebote nach Supabase hochladen (public.offers)
+    Push {
+        /// Nur diesen Supermarkt pushen (Standard: alle)
+        #[arg(long, value_enum, conflicts_with = "all_stores")]
+        store: Option<Store>,
+
+        /// Alle Supermärkte pushen (Standardverhalten, explizit)
+        #[arg(long, default_value_t = false)]
+        all_stores: bool,
+
+        /// PLZ, aus der die Angebote stammen (Pflicht außer bei --dry-run)
+        #[arg(long)]
+        region: Option<String>,
+
+        /// Nur zeigen, was hochgeladen würde — kein Netzwerkzugriff
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
     /// Preisverlauf eines Produkts anzeigen
     History {
         /// Suchbegriff (Teilstring des Titels)
@@ -251,6 +273,15 @@ fn main() -> Result<()> {
         Command::List { action } => shopping_list(action),
         Command::Deals { since, db } => deals(since, db),
         Command::Serve { port, db } => smartshop::api::serve(port, db),
+        Command::Push { store, all_stores: _, region, dry_run, db } => {
+            let opts = smartshop::push::PushOptions {
+                db_path: db,
+                chain: store.map(|s| s.chain().to_string()),
+                region,
+                dry_run,
+            };
+            smartshop::push::run(&opts, None)
+        }
         Command::History { query, db } => history(query, db),
     }
 }
@@ -510,6 +541,20 @@ impl Store {
             Store::AldiNord => "Aldi Nord",
             Store::AldiSued => "Aldi Süd",
             Store::Edeka => "Edeka",
+        }
+    }
+
+    // Anzeigename der Kette im Supabase-Schema (Spalte `market`)
+    fn chain(&self) -> &'static str {
+        match self {
+            Store::Rewe => "REWE",
+            Store::Penny => "Penny",
+            Store::Kaufland => "Kaufland",
+            Store::Lidl => "Lidl",
+            Store::Netto => "Netto",
+            Store::AldiNord => "ALDI Nord",
+            Store::AldiSued => "ALDI SÜD",
+            Store::Edeka => "EDEKA",
         }
     }
 }
