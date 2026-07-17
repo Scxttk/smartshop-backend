@@ -99,7 +99,7 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
     Ok(offers)
 }
 
-fn parse_page(html: &str, market_id: &str, offers: &mut Vec<Offer>, seen: &mut HashSet<String>) {
+pub fn parse_page(html: &str, market_id: &str, offers: &mut Vec<Offer>, seen: &mut HashSet<String>) {
     let doc = Html::parse_document(html);
     let sel_period = sel("div.offer__period");
     let sel_tile = sel("div.js-store-product-tile");

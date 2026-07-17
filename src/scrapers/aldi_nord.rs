@@ -45,7 +45,7 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
     Ok(offers)
 }
 
-fn parse_offers(html: &str, market_id: &str) -> Result<Vec<Offer>> {
+pub fn parse_offers(html: &str, market_id: &str) -> Result<Vec<Offer>> {
     let next_data = extract_next_data(html)
         .context("__NEXT_DATA__-Block nicht gefunden — Seitenstruktur geändert?")?;
     let root: serde_json::Value =
