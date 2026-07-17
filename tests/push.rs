@@ -294,8 +294,9 @@ fn push_batches_deletes_and_upserts() {
     run_push(&db_path, &base_url).unwrap();
 
     let reqs = log.lock().unwrap().clone();
-    // 1x DELETE (stale), 2x POST offers (100 + 50), 1x POST regions
-    assert_eq!(reqs.len(), 4, "Requests: {reqs:#?}");
+    // 1x DELETE (stale), 2x POST offers (100 + 50), 2x POST price_history,
+    // 1x POST regions
+    assert_eq!(reqs.len(), 6, "Requests: {reqs:#?}");
 
     let del = &reqs[0];
     assert_eq!(del.method, "DELETE");
@@ -320,7 +321,7 @@ fn push_batches_deletes_and_upserts() {
     assert_eq!(rows2.len(), 50);
     assert!(rows1.iter().all(|r| r.market == "REWE" && r.region.as_deref() == Some("01219")));
 
-    let reg = &reqs[3];
+    let reg = &reqs[5];
     assert_eq!(reg.method, "POST");
     assert!(reg.target.starts_with("/rest/v1/regions?"), "{}", reg.target);
     assert!(reg.target.contains("on_conflict=plz"), "{}", reg.target);
@@ -400,4 +401,172 @@ fn chain_filter_limits_push() {
     let cfg = PushConfig { base_url, api_key: "k".to_string() };
     push::run(&opts, Some(&cfg)).unwrap();
     assert!(log.lock().unwrap().is_empty());
+}
+
+// ------------------------------------------------------- Preis-Historie
+
+/// Wie spawn_mock, antwortet aber auf Targets mit dem angegebenen Präfix mit
+/// `fail_status` statt 200 — für Tests, die einen Teil-Ausfall simulieren.
+fn spawn_selective_mock(
+    fail_prefix: &'static str,
+    fail_status: u16,
+) -> (String, Arc<Mutex<Vec<Req>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let log: Arc<Mutex<Vec<Req>>> = Arc::new(Mutex::new(Vec::new()));
+    let log2 = log.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { break };
+            let mut reader = BufReader::new(stream);
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                let mut parts = line.split_whitespace();
+                let (Some(method), Some(target)) = (parts.next(), parts.next()) else { break };
+                let (method, target) = (method.to_string(), target.to_string());
+                let mut headers = Vec::new();
+                let mut content_length = 0usize;
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    let h = h.trim_end().to_string();
+                    if h.is_empty() {
+                        break;
+                    }
+                    if let Some((k, v)) = h.split_once(':') {
+                        let (k, v) = (k.trim().to_string(), v.trim().to_string());
+                        if k.eq_ignore_ascii_case("content-length") {
+                            content_length = v.parse().unwrap_or(0);
+                        }
+                        headers.push((k, v));
+                    }
+                }
+                let mut body = vec![0u8; content_length];
+                if content_length > 0 {
+                    reader.read_exact(&mut body).unwrap();
+                }
+                let fail = target.starts_with(fail_prefix);
+                log2.lock().unwrap().push(Req {
+                    method,
+                    target,
+                    headers,
+                    body: String::from_utf8_lossy(&body).into_owned(),
+                });
+                let resp = if fail {
+                    format!("HTTP/1.1 {fail_status} ERR\r\ncontent-length: 2\r\n\r\n{{}}")
+                } else {
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n[]"
+                        .to_string()
+                };
+                if reader.get_mut().write_all(resp.as_bytes()).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    (format!("http://{addr}"), log)
+}
+
+fn history_posts(reqs: &[Req]) -> Vec<&Req> {
+    reqs.iter()
+        .filter(|r| r.method == "POST" && r.target.starts_with("/rest/v1/price_history"))
+        .collect()
+}
+
+#[test]
+fn push_sends_history_rows() {
+    let db_path = temp_db("hist");
+    seed_db(&db_path, 150);
+    let (base_url, log) = spawn_mock();
+
+    run_push(&db_path, &base_url).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    let hist = history_posts(&reqs);
+    // 150 Zeilen in Batches à 100
+    assert_eq!(hist.len(), 2, "History-Requests: {reqs:#?}");
+    let rows: Vec<serde_json::Value> = hist
+        .iter()
+        .flat_map(|r| {
+            serde_json::from_str::<serde_json::Value>(&r.body)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .clone()
+        })
+        .collect();
+    assert_eq!(rows.len(), 150);
+    let first = &rows[0];
+    assert_eq!(first["market"], "REWE");
+    assert_eq!(first["region"], "01219");
+    assert_eq!(first["valid_from"], "2026-07-13");
+    assert!(first["price"].is_number());
+    // Nur die Historien-Spalten — keine Anzeige-Felder wie image_url/emoji
+    assert!(first.get("image_url").is_none(), "{first}");
+    assert!(first.get("emoji").is_none(), "{first}");
+    assert!(first.get("source").is_none(), "{first}");
+}
+
+#[test]
+fn history_upsert_headers() {
+    let db_path = temp_db("hist-headers");
+    seed_db(&db_path, 2);
+    let (base_url, log) = spawn_mock();
+
+    run_push(&db_path, &base_url).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    let hist = history_posts(&reqs);
+    assert_eq!(hist.len(), 1);
+    let h = hist[0];
+    assert!(
+        h.target.contains("on_conflict=market%2Cproduct%2Cregion%2Cvalid_from")
+            || h.target.contains("on_conflict=market,product,region,valid_from"),
+        "{}",
+        h.target
+    );
+    assert_eq!(h.header("prefer"), Some("resolution=merge-duplicates"));
+    assert_eq!(h.header("apikey"), Some("test-key"));
+    assert_eq!(h.header("authorization"), Some("Bearer test-key"));
+}
+
+#[test]
+fn history_skips_null_price() {
+    let db_path = temp_db("hist-null");
+    // seed_db legt zusätzlich ein Angebot "Ohne Preis" (price: None) an
+    seed_db(&db_path, 3);
+    let (base_url, log) = spawn_mock();
+
+    run_push(&db_path, &base_url).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    let hist = history_posts(&reqs);
+    assert_eq!(hist.len(), 1);
+    let rows: serde_json::Value = serde_json::from_str(&hist[0].body).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 3);
+    assert!(!hist[0].body.contains("Ohne Preis"), "{}", hist[0].body);
+}
+
+#[test]
+fn history_failure_does_not_fail_push() {
+    let db_path = temp_db("hist-fail");
+    seed_db(&db_path, 2);
+    let (base_url, log) = spawn_selective_mock("/rest/v1/price_history", 500);
+
+    // Offers-Push muss trotz kaputter Historie erfolgreich durchlaufen …
+    run_push(&db_path, &base_url).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    // … der Historie-Request wurde versucht …
+    assert_eq!(history_posts(&reqs).len(), 1, "{reqs:#?}");
+    // … und der Regions-Upsert danach fand trotzdem statt.
+    assert!(
+        reqs.iter().any(|r| r.method == "POST" && r.target.starts_with("/rest/v1/regions")),
+        "{reqs:#?}"
+    );
 }
