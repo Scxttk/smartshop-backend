@@ -152,6 +152,28 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// Alle aktiven Regionen aus Supabase abrufen und syncen (fetch + push)
+    SyncRegions {
+        /// Höchstens so viele Regionen pro Lauf syncen
+        #[arg(long, default_value_t = 10)]
+        max_regions: usize,
+
+        /// Pfad zum Rewe TLS-Zertifikat (PEM)
+        #[arg(long, default_value = "cert.pem")]
+        cert: String,
+
+        /// Pfad zum privaten Schlüssel
+        #[arg(long, default_value = "private.key")]
+        key: String,
+
+        /// Nur zeigen, was hochgeladen würde — keine Supabase-Writes
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
     /// Preisverlauf eines Produkts anzeigen
     History {
         /// Suchbegriff (Teilstring des Titels)
@@ -270,6 +292,18 @@ fn main() -> Result<()> {
                 dry_run,
             };
             smartshop::push::run(&opts, None)
+        }
+        Command::SyncRegions { max_regions, cert, key, dry_run, db } => {
+            let opts = smartshop::sync::SyncOptions { db_path: db, dry_run, max_regions };
+            let fetcher = |plz: &str| {
+                Store::ALL
+                    .iter()
+                    .map(|store| {
+                        (store.chain().to_string(), scrape_store(*store, plz, &cert, &key))
+                    })
+                    .collect()
+            };
+            smartshop::sync::run(&opts, None, &fetcher)
         }
         Command::History { query, db } => history(query, db),
     }
