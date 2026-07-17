@@ -8,8 +8,38 @@ Zwei Workflows liegen unter `.github/workflows/`:
   `Swatinem/rust-cache` gecacht.
 - **`nightly.yml`** — der Cloud-Ersatz bzw. das Fallback für den lokalen
   launchd-Agenten (`scripts/nightly.sh`): Release-Build, dann
-  `fetch --all-stores` in eine temporäre DB, dann `push --region` nach
-  Supabase.
+  `sync-regions` — liest alle aktiven Regionen aus der Supabase-Tabelle
+  `public.regions` und macht pro PLZ `fetch --all-stores`, meldet die
+  gefundenen Filialen nach `public.markets` und pusht die Angebote mit
+  `--region <PLZ>`. Schlägt der ganze Sync fehl (Tabelle leer oder
+  unerreichbar, alle Regionen gescheitert), greift der **Fallback**: der
+  alte Einzel-PLZ-Pfad `fetch --all-stores --zip $SMARTSHOP_ZIP` +
+  `push --region $SMARTSHOP_ZIP`. Die Pipeline geht also nie dunkel.
+
+## Multi-Region: einmalige Migration
+
+Der Multi-Region-Sync braucht die Migration
+[`supabase/migration_v3_multi_region.sql`](../supabase/migration_v3_multi_region.sql)
+— **einmal manuell im Supabase SQL-Editor ausführen** (idempotent, kann
+gefahrlos wiederholt werden). Sie ergänzt:
+
+- `regions.requested_at` (Anforderungszeitpunkt) und `regions.active`
+  (nur aktive Regionen werden gesynct), plus Check-Constraint „PLZ =
+  5 Ziffern".
+- Policy „Anon insert": die App darf mit dem anon-Key neue Regionen
+  **anfordern** (nur INSERT, kein UPDATE/DELETE).
+- Tabelle `public.markets` (`chain`, `branch_name`, `market_id`, `plz`,
+  `updated_at`): welche Filiale pro Kette+PLZ gefunden wurde. Public read,
+  service write.
+
+Das Verzeichnis `supabase/` in diesem Repo ist ab jetzt die kanonische
+Heimat des Schemas (Kopien von `schema.sql`, `migration_v2.sql`,
+`migration_regions.sql`, `setup_full.sql` aus dem iOS-Repo plus die neue v3).
+
+Pro Lauf werden höchstens 10 Regionen gesynct (`--max-regions`), weitere
+werden geloggt und übersprungen; sortiert wird nach `requested_at`
+(älteste Anfrage zuerst). Fehler einzelner Regionen brechen den Lauf nicht
+ab — der Sync schlägt nur fehl, wenn **alle** Regionen scheitern.
 
 ## Zeitplan
 
@@ -38,7 +68,7 @@ Unter **Settings → Secrets and variables → Actions** im Repo:
 
 | Name | Inhalt |
 |---|---|
-| `SMARTSHOP_ZIP` | Postleitzahl für die Filialsuche, z. B. `01219` |
+| `SMARTSHOP_ZIP` | Fallback-Postleitzahl, falls der Regionen-Sync scheitert, z. B. `01219` |
 
 Oder per CLI:
 
@@ -61,8 +91,10 @@ gh run watch          # letzten Lauf live verfolgen
 ## Ergebnis lesen
 
 - **Job-Summary**: Auf der Lauf-Seite (Actions → Lauf anklicken) steht unter
-  *Summary* eine Tabelle „Markt / Filiale / Ergebnis" — pro Store entweder die
-  Anzahl der Angebote oder `FEHLER: …`, plus die Gesamtzahl der Angebote.
+  *Summary* **pro Region** eine Tabelle „Markt / Filiale / Ergebnis" — pro
+  Store entweder die Anzahl der Angebote oder `FEHLER: …`, plus die Anzahl
+  der Angebote der zuletzt gesyncten Region in der lokalen DB. Lief der
+  Fallback, heißt der Block „Zusammenfassung (Fallback PLZ)".
 - **Artefakt `nightly-log`**: das vollständige fetch+push-Log, 7 Tage
   aufbewahrt. Auf der Lauf-Seite unter *Artifacts* herunterladen.
 
@@ -72,8 +104,11 @@ gh run watch          # letzten Lauf live verfolgen
   Client-Zertifikat läuft (siehe `docs/rewe-cert.md`) und daher in CI immer
   als `FEHLER` erscheint. Der Job bleibt grün, solange insgesamt Angebote
   ankommen.
-- **Der Job schlägt fehl**, wenn der Fetch insgesamt **0 Angebote** liefert
-  oder der Push nach Supabase scheitert.
+- **Einzelne Regionen dürfen fehlschlagen** — der Sync macht mit der
+  nächsten Region weiter und schlägt nur fehl, wenn alle scheitern; dann
+  greift der Einzel-PLZ-Fallback.
+- **Der Job schlägt fehl**, wenn am Ende **0 Angebote** in der DB liegen
+  oder auch der Fallback-Push nach Supabase scheitert.
 
 ## Bekanntes Risiko: Akamai vs. Runner-IPs
 
