@@ -53,6 +53,10 @@ enum Command {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
 
+        /// Nach dem Abruf die Watchlist gegen die neuen Angebote prüfen
+        #[arg(long, default_value_t = false, conflicts_with = "dry_run")]
+        notify: bool,
+
         /// Pfad zur SQLite-Datenbank
         #[arg(long, default_value = "smartshop.db")]
         db: String,
@@ -159,12 +163,16 @@ enum WatchAction {
 
 fn main() -> Result<()> {
     match Cli::parse().command {
-        Command::Fetch { zip, store, all_stores, cert, key, dry_run, db } => {
+        Command::Fetch { zip, store, all_stores, cert, key, dry_run, notify, db } => {
             if all_stores {
-                fetch_all(zip, cert, key, dry_run, db)
+                fetch_all(zip, cert, key, dry_run, &db)?;
             } else {
-                fetch(zip, store, cert, key, dry_run, db)
+                fetch(zip, store, cert, key, dry_run, &db)?;
             }
+            if notify {
+                notify_watchlist(&db)?;
+            }
+            Ok(())
         }
         Command::Search { query, max_price, db } => search(query, max_price, db),
         Command::Compare { query, db } => compare(query, db),
@@ -303,7 +311,16 @@ fn scrape_store(store: Store, zip: &str, cert: &str, key: &str) -> Result<(smart
     Ok((market, offers))
 }
 
-fn fetch_all(zip: String, cert: String, key: String, dry_run: bool, db: String) -> Result<()> {
+fn notify_watchlist(db: &str) -> Result<()> {
+    println!("\nDeals für deine Watchlist:");
+    let conn = db::open(db)?;
+    if !print_watch_hits(&conn)? {
+        println!("Keine neuen Deals.");
+    }
+    Ok(())
+}
+
+fn fetch_all(zip: String, cert: String, key: String, dry_run: bool, db: &str) -> Result<()> {
     struct Row {
         store: &'static str,
         market: String,
@@ -322,7 +339,7 @@ fn fetch_all(zip: String, cert: String, key: String, dry_run: bool, db: String) 
                     }
                     rows.push(Row { store: store.label(), market: market.name, result: Ok(count) });
                 } else {
-                    match save_offers(&db, &market, &offers) {
+                    match save_offers(db, &market, &offers) {
                         Ok(()) => {
                             println!("{count} Angebote in '{db}' gespeichert.");
                             rows.push(Row { store: store.label(), market: market.name, result: Ok(count) });
@@ -366,7 +383,7 @@ fn save_offers(db: &str, market: &smartshop::models::Market, offers: &[Offer]) -
     Ok(())
 }
 
-fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db: String) -> Result<()> {
+fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db: &str) -> Result<()> {
     let (market, offers) = scrape_store(store, &zip, &cert, &key)?;
     println!("{} Angebote gefunden.", offers.len());
 
@@ -375,7 +392,7 @@ fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db
             println!("  {}", format_offer(offer));
         }
     } else {
-        save_offers(&db, &market, &offers)?;
+        save_offers(db, &market, &offers)?;
         println!("{} Angebote in '{}' gespeichert.", offers.len(), db);
     }
 
