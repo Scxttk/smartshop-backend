@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 
 use crate::models::{Market, Offer};
-use crate::scrapers::util::curl_get;
+use crate::scrapers::util::{self, curl_get};
 
 // ALDI Süd über die öffentliche Produktsuche-API der Website (kein Login):
 //
@@ -51,10 +51,11 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
                 ("Sec-Fetch-Mode", "cors"),
                 ("Sec-Fetch-Dest", "empty"),
             ],
-        )?;
+        )
+        .with_context(|| util::ctx("ALDI Süd", "Angebote laden", &url))?;
 
-        let raw: serde_json::Value =
-            serde_json::from_str(&body).context("ALDI-Süd-Produktsuche JSON parse fehlgeschlagen")?;
+        let raw: serde_json::Value = serde_json::from_str(&body)
+            .with_context(|| util::ctx("ALDI Süd", "Angebote JSON parsen", &url))?;
 
         let total = raw
             .pointer("/meta/pagination/totalCount")
@@ -80,7 +81,7 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
     }
 
     if offers.is_empty() {
-        bail!("Keine ALDI-Süd-Angebote gefunden — API-Struktur hat sich möglicherweise geändert");
+        bail!("[ALDI Süd] Keine Angebote gefunden ({SEARCH_URL}) — API-Struktur hat sich möglicherweise geändert");
     }
     Ok(offers)
 }

@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::{HashMap, HashSet};
 
 use crate::models::{Market, Offer};
+use crate::scrapers::util;
 
 // ALDI Nord über aldi-nord.de (Next.js/Magnolia, server-seitig gerendert).
 //
@@ -17,26 +18,23 @@ use crate::models::{Market, Offer};
 // synthetischen National-Markt (wie lidl.rs).
 
 const OFFERS_URL: &str = "https://www.aldi-nord.de/angebote.html";
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 pub fn find_market(_zip: &str) -> Result<Market> {
     Ok(Market { id: "ALDI_NORD_DE".to_string(), name: "ALDI Nord Deutschland".to_string() })
 }
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
-    let html = reqwest::blocking::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .context("HTTP-Client konnte nicht erstellt werden")?
+    util::polite_pause(OFFERS_URL);
+    let html = util::blocking_client()?
         .get(OFFERS_URL)
         .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
         .header("Accept-Language", "de-DE,de;q=0.9")
         .send()
-        .context("ALDI-Nord-Angebotsseite nicht erreichbar")?
+        .with_context(|| util::ctx("ALDI Nord", "Angebote laden", OFFERS_URL))?
         .error_for_status()
-        .context("ALDI-Nord-Angebotsseite lieferte einen Fehler")?
+        .with_context(|| util::ctx("ALDI Nord", "Angebote laden (HTTP-Status)", OFFERS_URL))?
         .text()
-        .context("ALDI-Nord-Angebotsseite konnte nicht gelesen werden")?;
+        .with_context(|| util::ctx("ALDI Nord", "Angebote lesen", OFFERS_URL))?;
 
     let offers = parse_offers(&html, &market.id)?;
     if offers.is_empty() {

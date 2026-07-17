@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 
 use crate::models::{Market, Offer};
+use crate::scrapers::util;
 
 // Penny-Angebote über die öffentlichen JSON-Endpoints von penny.de.
 // Kein Client-Zertifikat nötig, nur ein Browser-User-Agent.
@@ -12,7 +13,6 @@ use crate::models::{Market, Offer};
 //             -> { "offerTiles": [...] }
 
 const BASE_URL: &str = "https://www.penny.de";
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36";
 
 pub fn find_market(zip: &str) -> Result<Market> {
     block_on(async {
@@ -57,14 +57,16 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
             .map(String::from);
 
         // Kategorien und Wochen stehen im HTML der Angebotsseite
+        let angebote_url = format!("{BASE_URL}/angebote");
+        util::polite_pause(&angebote_url);
         let html = client
-            .get(format!("{BASE_URL}/angebote"))
+            .get(&angebote_url)
             .send()
             .await
-            .context("Penny-Angebotsseite-Request fehlgeschlagen")?
+            .with_context(|| util::ctx("Penny", "Angebotsseite laden", &angebote_url))?
             .text()
             .await
-            .context("Penny-Angebotsseite konnte nicht gelesen werden")?;
+            .with_context(|| util::ctx("Penny", "Angebotsseite lesen", &angebote_url))?;
 
         let categories = extract_attr_values(&html, "data-category-name");
         if categories.is_empty() {
@@ -90,11 +92,12 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
                     url.push_str(&format!("?region={r}"));
                 }
 
+                util::polite_pause(&url);
                 let resp = client
                     .get(&url)
                     .send()
                     .await
-                    .with_context(|| format!("Penny-Angebote-Request fehlgeschlagen: {url}"))?;
+                    .with_context(|| util::ctx("Penny", "Angebote laden", &url))?;
 
                 // Nicht jede Kategorie existiert in jeder Region/Woche
                 if !resp.status().is_success() {
@@ -195,27 +198,26 @@ pub fn parse_offer_tiles(
 }
 
 fn build_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .context("HTTP-Client konnte nicht erstellt werden")
+    util::async_client()
 }
 
 async fn fetch_markets(client: &reqwest::Client) -> Result<Vec<serde_json::Value>> {
+    let url = format!("{BASE_URL}/.rest/market");
+    util::polite_pause(&url);
     let resp = client
-        .get(format!("{BASE_URL}/.rest/market"))
+        .get(&url)
         .send()
         .await
-        .context("Penny-Marktliste-Request fehlgeschlagen")?;
+        .with_context(|| util::ctx("Penny", "Markt-Lookup", &url))?;
 
     if !resp.status().is_success() {
-        bail!("Penny-Marktliste lieferte HTTP {}", resp.status());
+        bail!("[Penny] Markt-Lookup lieferte HTTP {}: {url}", resp.status());
     }
 
     let raw: serde_json::Value = resp
         .json()
         .await
-        .context("Penny-Marktliste JSON parse fehlgeschlagen")?;
+        .with_context(|| util::ctx("Penny", "Markt-Lookup JSON parsen", &url))?;
 
     raw.as_array()
         .cloned()
