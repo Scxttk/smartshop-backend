@@ -61,6 +61,15 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// Preisverlauf eines Produkts anzeigen
+    History {
+        /// Suchbegriff (Teilstring des Titels)
+        query: String,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -69,7 +78,27 @@ fn main() -> Result<()> {
             fetch(zip, store, cert, key, dry_run, db)
         }
         Command::Search { query, max_price, db } => search(query, max_price, db),
+        Command::History { query, db } => history(query, db),
     }
+}
+
+fn history(query: String, db: String) -> Result<()> {
+    let conn = db::open(&db)?;
+    let points = db::price_history(&conn, &query)?;
+    if points.is_empty() {
+        println!("Kein Preisverlauf für '{query}' gefunden.");
+        return Ok(());
+    }
+    let mut current_title = String::new();
+    for p in &points {
+        if p.title != current_title {
+            println!("{} ({})", p.title, p.market_id);
+            current_title = p.title.clone();
+        }
+        let price = p.price.map(|v| format!("{v:.2} €")).unwrap_or_else(|| "-".to_string());
+        println!("  {}  {}", p.seen_at, price);
+    }
+    Ok(())
 }
 
 fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db: String) -> Result<()> {
