@@ -148,6 +148,10 @@ enum Command {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
 
+        /// Produktbilder NICHT in den Storage-Bucket spiegeln (Händler-URLs behalten)
+        #[arg(long, default_value_t = false)]
+        no_mirror_images: bool,
+
         /// Pfad zur SQLite-Datenbank
         #[arg(long, default_value = "smartshop.db")]
         db: String,
@@ -284,12 +288,13 @@ fn main() -> Result<()> {
         Command::List { action } => shopping_list(action),
         Command::Deals { since, db } => deals(since, db),
         Command::Serve { port, db } => smartshop::api::serve(port, db),
-        Command::Push { store, all_stores: _, region, dry_run, db } => {
+        Command::Push { store, all_stores: _, region, dry_run, no_mirror_images, db } => {
             let opts = smartshop::push::PushOptions {
                 db_path: db,
                 chain: store.map(|s| s.chain().to_string()),
                 region,
                 dry_run,
+                mirror_images: !no_mirror_images,
             };
             smartshop::push::run(&opts, None)
         }
