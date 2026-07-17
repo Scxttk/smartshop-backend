@@ -1,13 +1,43 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use rusqlite::{Connection, params};
 
 use crate::models::{Market, Offer};
 
+/// Aktuelle Schema-Version (PRAGMA user_version). Zukünftige Schema-Änderungen
+/// müssen SCHEMA_VERSION erhöhen und in migrate() einen Migrationsschritt
+/// von der Vorversion ergänzen.
+pub const SCHEMA_VERSION: i64 = 1;
+
 pub fn open(path: &str) -> Result<Connection> {
     let conn = Connection::open(path)?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
-    init_schema(&conn)?;
+    migrate(&conn)?;
     Ok(conn)
+}
+
+pub fn schema_version(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row("PRAGMA user_version", [], |row| row.get(0))?)
+}
+
+fn migrate(conn: &Connection) -> Result<()> {
+    let version = schema_version(conn)?;
+    match version {
+        // 0 = neue oder vor Einführung der Versionierung angelegte DB;
+        // init_schema ist idempotent (CREATE IF NOT EXISTS) und entspricht v1.
+        0 => {
+            init_schema(conn)?;
+            conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+        }
+        SCHEMA_VERSION => {}
+        v if v > SCHEMA_VERSION => {
+            bail!(
+                "Datenbank hat Schema-Version {v}, dieses Programm unterstützt maximal {SCHEMA_VERSION}. Bitte smartshop aktualisieren."
+            );
+        }
+        // Platz für künftige Migrationen v -> v+1
+        v => bail!("Unbekannte Schema-Version {v} — keine Migration definiert."),
+    }
+    Ok(())
 }
 
 fn init_schema(conn: &Connection) -> Result<()> {
