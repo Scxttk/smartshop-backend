@@ -130,14 +130,15 @@ smartshop export --format json --out angebote.json
 
 Ohne `--out` geht die Ausgabe auf stdout; `--query` filtert nach Titel/Untertitel.
 
-### serve — lesende JSON-API
+### serve — Web-Dashboard + lesende JSON-API
 
 ```sh
 smartshop serve --port 8080
-# HTTP-API läuft auf http://0.0.0.0:8080 (DB: smartshop.db)
+# Web-UI läuft auf http://0.0.0.0:8080, JSON-API auf http://0.0.0.0:8080/api (DB: smartshop.db)
 ```
 
-Endpoints siehe unten und [docs/cron.md](docs/cron.md).
+Das Web-Dashboard liegt auf `/`, die JSON-Endpoints unter `/api/*`
+(siehe unten und [docs/cron.md](docs/cron.md)).
 
 ## Scraper-Unterstützung
 
@@ -160,7 +161,9 @@ Zertifikat nicht live gemessen.
 ## HTTP-API-Endpoints
 
 Alle Endpoints sind `GET` und liefern JSON; Fehler als `{"error": "..."}` mit
-Status 400 (fehlender/ungültiger Parameter) oder 500.
+Status 400 (fehlender/ungültiger Parameter) oder 500. Über `smartshop serve`
+sind sie unter dem Präfix **`/api`** erreichbar (z. B. `/api/offers?q=Butter`);
+die Wurzelpfade gehören dem Web-Dashboard.
 
 | Endpoint | Parameter | Liefert |
 |---|---|---|
@@ -177,6 +180,22 @@ Status 400 (fehlender/ungültiger Parameter) oder 500.
 
 Die API ist rein lesend und **ohne Authentifizierung** — nur im vertrauten Netz
 betreiben.
+
+## Web-Dashboard
+
+`smartshop serve` liefert zusätzlich ein server-gerendertes HTML-Dashboard —
+komplett ohne JavaScript, CSS eingebettet, keine externen Assets.
+
+| Seite | Inhalt |
+|---|---|
+| `/` | Übersicht: Angebote pro Markt, Gültigkeitszeiträume, Top-Rabatte |
+| `/search?q=…` | Angebotssuche mit Markt, Preis und Grundpreis |
+| `/compare?q=…` | Preisvergleich pro Produkt über alle Märkte, günstigster zuerst |
+| `/watchlist` | Beobachtungen anzeigen, anlegen und entfernen (POST-Formulare) |
+| `/history?offer=…` | Preisverlauf als Inline-SVG-Sparkline plus Tabelle |
+
+Wie die JSON-API ist das Dashboard ohne Authentifizierung — nur im vertrauten
+Netz betreiben. Schreibend ist einzig die Watchlist (anlegen/entfernen).
 
 ## Datenbank & Schema
 
