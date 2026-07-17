@@ -4,6 +4,7 @@ pub mod enrich;
 pub mod models;
 pub mod push;
 pub mod scrapers;
+pub mod storage;
 pub mod stores;
 pub mod sync;
 pub mod units;

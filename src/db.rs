@@ -6,7 +6,7 @@ use crate::models::{Market, Offer};
 /// Aktuelle Schema-Version (PRAGMA user_version). Zukünftige Schema-Änderungen
 /// müssen SCHEMA_VERSION erhöhen und in migrate() einen Migrationsschritt
 /// von der Vorversion ergänzen.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 pub fn open(path: &str) -> Result<Connection> {
     let conn = Connection::open(path)?;
@@ -33,11 +33,46 @@ fn migrate(conn: &Connection) -> Result<()> {
             0 => init_schema(conn)?,
             1 => migrate_v1_to_v2(conn)?,
             2 => migrate_v2_to_v3(conn)?,
+            3 => migrate_v3_to_v4(conn)?,
             v => bail!("Unbekannte Schema-Version {v} — keine Migration definiert."),
         }
         version += 1;
         conn.execute_batch(&format!("PRAGMA user_version = {version};"))?;
     }
+    Ok(())
+}
+
+// v4: Cache gespiegelter Produktbilder (Supabase Storage). Merkt sich pro
+// Händler-Bild-URL die schon hochgeladene Bucket-URL, damit nächtliche Läufe
+// bekannte Bilder ohne Netzwerkzugriff überspringen.
+fn migrate_v3_to_v4(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS uploaded_images (
+            source_url  TEXT PRIMARY KEY,
+            public_url  TEXT NOT NULL,
+            uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );",
+    )?;
+    Ok(())
+}
+
+/// Schon gespiegelte Bucket-URL für eine Händler-Bild-URL, falls vorhanden.
+pub fn cached_image_url(conn: &Connection, source_url: &str) -> Result<Option<String>> {
+    let mut stmt =
+        conn.prepare("SELECT public_url FROM uploaded_images WHERE source_url = ?1")?;
+    let mut rows = stmt.query([source_url])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(row.get(0)?)),
+        None => Ok(None),
+    }
+}
+
+/// Zuordnung Händler-URL -> Bucket-URL merken (idempotent).
+pub fn cache_image_url(conn: &Connection, source_url: &str, public_url: &str) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO uploaded_images (source_url, public_url) VALUES (?1, ?2)",
+        params![source_url, public_url],
+    )?;
     Ok(())
 }
 
