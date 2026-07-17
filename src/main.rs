@@ -1,11 +1,8 @@
-mod db;
-mod models;
-mod scrapers;
-
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::models::Offer;
+use smartshop::models::Offer;
+use smartshop::{db, scrapers, units};
 
 #[derive(Parser)]
 #[command(name = "smartshop", about = "Supermarkt-Angebote scrapen und speichern")]
@@ -63,6 +60,15 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// Preise eines Produkts über alle gespeicherten Märkte vergleichen
+    Compare {
+        /// Suchbegriff (Teilstring des Titels)
+        query: String,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
     /// Preisverlauf eines Produkts anzeigen
     History {
         /// Suchbegriff (Teilstring des Titels)
@@ -80,6 +86,7 @@ fn main() -> Result<()> {
             fetch(zip, store, cert, key, dry_run, db)
         }
         Command::Search { query, max_price, db } => search(query, max_price, db),
+        Command::Compare { query, db } => compare(query, db),
         Command::History { query, db } => history(query, db),
     }
 }
@@ -165,6 +172,74 @@ fn search(query: String, max_price: Option<f64>, db: String) -> Result<()> {
             println!("  {}", format_offer(offer));
         }
         println!("{} Treffer.", offers.len());
+    }
+    Ok(())
+}
+
+// Anzeigename: Titel, plus Untertitel wenn er kein reiner Mengen-Text ist
+// (Kaufland: Marke im Titel, Produktname im Untertitel).
+fn display_name(offer: &Offer) -> String {
+    match &offer.subtitle {
+        Some(sub) if units::parse_quantity(sub).is_none() && !sub.is_empty() => {
+            format!("{} {}", offer.title, sub)
+        }
+        _ => offer.title.clone(),
+    }
+}
+
+fn compare(query: String, db: String) -> Result<()> {
+    let conn = db::open(&db)?;
+    let offers = db::search_offers_broad(&conn, &query)?;
+    if offers.is_empty() {
+        println!("Keine Angebote für '{query}' gefunden.");
+        return Ok(());
+    }
+    let market_names: std::collections::HashMap<String, String> = db::markets(&conn)?
+        .into_iter()
+        .map(|m| (m.id, m.name))
+        .collect();
+
+    // Nach normalisiertem Produktnamen gruppieren, Reihenfolge des Auftretens
+    let mut groups: Vec<(String, Vec<&Offer>)> = Vec::new();
+    for offer in &offers {
+        let key = units::normalize_name(&display_name(offer));
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, list)) => list.push(offer),
+            None => groups.push((key, vec![offer])),
+        }
+    }
+
+    for (_, mut group) in groups {
+        // Günstigster Markt zuerst; Angebote ohne Preis ans Ende
+        group.sort_by(|a, b| {
+            a.price
+                .unwrap_or(f64::INFINITY)
+                .total_cmp(&b.price.unwrap_or(f64::INFINITY))
+        });
+        println!("{}", display_name(group[0]));
+        let mut printed = std::collections::HashSet::new();
+        for offer in group {
+            // Gleicher Markt + gleicher Preis (z. B. aktuelle und nächste Woche) nur einmal
+            if !printed.insert((offer.market_id.clone(), offer.price.map(|p| (p * 100.0) as i64))) {
+                continue;
+            }
+            let market = market_names
+                .get(&offer.market_id)
+                .map(String::as_str)
+                .unwrap_or(offer.market_id.as_str());
+            let price = offer
+                .price
+                .map(|p| format!("{p:.2} €"))
+                .unwrap_or_else(|| "-".to_string());
+            let unit = units::derive_unit_price(
+                offer.price,
+                &[offer.subtitle.as_deref(), offer.overline.as_deref(), Some(&offer.title)],
+            )
+            .map(|up| format!("  ({})", up.format()))
+            .unwrap_or_default();
+            let sub = offer.subtitle.as_ref().map(|s| format!(" ({s})")).unwrap_or_default();
+            println!("  {market:<20} {price:>8}{unit}{sub}");
+        }
     }
     Ok(())
 }
