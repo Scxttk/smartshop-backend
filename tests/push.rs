@@ -73,6 +73,16 @@ fn map_drops_pure_quantity_subtitle() {
 }
 
 #[test]
+fn map_keeps_subtitle_with_product_name_and_quantity() {
+    // Kaufland-Stil: Untertitel trägt Produktname UND Menge — muss erhalten
+    // bleiben, sonst kollabieren alle Angebote einer Marke beim Dedupe
+    let mut o = offer("K-Classic", Some(0.99));
+    o.subtitle = Some("Rispentomaten, 500-g-Schale".to_string());
+    let row = map_offer(&o, "Kaufland", None).unwrap();
+    assert_eq!(row.product, "K-Classic Rispentomaten, 500-g-Schale");
+}
+
+#[test]
 fn map_computes_base_price_from_quantity() {
     let mut o = offer("Wein", Some(3.29));
     o.subtitle = Some("0.75 l".to_string());
@@ -118,6 +128,9 @@ fn dedupe_on_conflict_key() {
 fn chain_detection_from_market() {
     let m = |id: &str, name: &str| Market { id: id.to_string(), name: name.to_string() };
     assert_eq!(chain_for(&m("LIDL_DE", "Lidl Deutschland")), Some("Lidl"));
+    // EDEKA-Vertriebsmarken ohne "edeka" im Namen (ID ist nur numerisch)
+    assert_eq!(chain_for(&m("022745", "E center Peltzer")), Some("EDEKA"));
+    assert_eq!(chain_for(&m("4711", "Marktkauf Dresden")), Some("EDEKA"));
     assert_eq!(chain_for(&m("ALDI_NORD_DE", "ALDI Nord Deutschland")), Some("ALDI Nord"));
     assert_eq!(chain_for(&m("ALDI_SUED_DE", "ALDI Süd Deutschland")), Some("ALDI SÜD"));
     assert_eq!(chain_for(&m("831971", "REWE Christian Koehler oHG")), Some("REWE"));
