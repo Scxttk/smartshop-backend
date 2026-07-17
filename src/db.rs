@@ -35,6 +35,18 @@ fn init_schema(conn: &Connection) -> Result<()> {
             fetched_at    TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (market_id) REFERENCES markets(id)
         );
+
+        CREATE TABLE IF NOT EXISTS price_history (
+            offer_id   TEXT NOT NULL,
+            market_id  TEXT NOT NULL,
+            title      TEXT NOT NULL,
+            price      REAL,
+            seen_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (offer_id, seen_at)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_price_history_title
+            ON price_history (title);
     ")?;
     Ok(())
 }
@@ -45,6 +57,31 @@ pub fn upsert_market(conn: &Connection, market: &Market) -> Result<()> {
         params![market.id, market.name],
     )?;
     Ok(())
+}
+
+pub struct PricePoint {
+    pub title: String,
+    pub market_id: String,
+    pub price: Option<f64>,
+    pub seen_at: String,
+}
+
+pub fn price_history(conn: &Connection, query: &str) -> Result<Vec<PricePoint>> {
+    let mut stmt = conn.prepare(
+        "SELECT title, market_id, price, seen_at
+         FROM price_history
+         WHERE title LIKE '%' || ?1 || '%'
+         ORDER BY title, seen_at",
+    )?;
+    let rows = stmt.query_map(params![query], |row| {
+        Ok(PricePoint {
+            title: row.get(0)?,
+            market_id: row.get(1)?,
+            price: row.get(2)?,
+            seen_at: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
 pub fn search_offers(conn: &Connection, query: &str, max_price: Option<f64>) -> Result<Vec<Offer>> {
@@ -101,6 +138,13 @@ pub fn upsert_offer(conn: &Connection, offer: &Offer) -> Result<()> {
             offer.biozid as i64,
             offer.flyer_page,
         ],
+    )?;
+    // Ein History-Eintrag pro Angebot und Tag; wiederholte Läufe am selben
+    // Tag aktualisieren nur den Preis.
+    conn.execute(
+        "INSERT OR REPLACE INTO price_history (offer_id, market_id, title, price, seen_at)
+         VALUES (?1, ?2, ?3, ?4, date('now'))",
+        params![offer.id, offer.market_id, offer.title, offer.price],
     )?;
     Ok(())
 }
