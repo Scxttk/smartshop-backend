@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Vorlage — nicht direkt kopieren! scripts/install-launchd.sh ersetzt
+         __SCRIPT__ und __LOGDIR__ und installiert die fertige Datei nach
+         ~/Library/LaunchAgents/de.smartshop.nightly.plist. -->
+    <key>Label</key>
+    <string>de.smartshop.nightly</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__SCRIPT__</string>
+    </array>
+
+    <!-- Täglich 06:30. Schläft der Mac, holt launchd den Lauf nach dem
+         Aufwachen nach. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Fängt nur Ausgaben ab, die vor dem eigenen Logging des Skripts
+         passieren (z. B. bash-Startfehler). -->
+    <key>StandardOutPath</key>
+    <string>__LOGDIR__/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOGDIR__/launchd.err.log</string>
+</dict>
+</plist>
