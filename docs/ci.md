@@ -41,6 +41,50 @@ werden geloggt und übersprungen; sortiert wird nach `requested_at`
 (älteste Anfrage zuerst). Fehler einzelner Regionen brechen den Lauf nicht
 ab — der Sync schlägt nur fehl, wenn **alle** Regionen scheitern.
 
+## On-Demand-Scraping: Trigger auf `regions`
+
+Damit eine neu angeforderte PLZ nicht bis zum nächsten Nightly-Lauf wartet,
+feuert ein Datenbank-Trigger bei jedem INSERT in `public.regions` einen
+asynchronen HTTP-Call (pg_net) an GitHubs `workflow_dispatch`-API für
+`nightly.yml`. Einrichtung:
+
+1. **Fine-grained PAT erstellen** (github.com → Settings → Developer
+   settings → Fine-grained tokens): nur Repo `Scxttk/smartshop-backend`,
+   Permission **Actions: Read and write**, sonst nichts.
+2. **PAT im Supabase Vault ablegen** (SQL-Editor):
+
+   ```sql
+   select vault.create_secret('<PAT>', 'github_pat');
+   ```
+
+3. **Migration ausführen**:
+   [`supabase/migration_v4_region_trigger.sql`](../supabase/migration_v4_region_trigger.sql)
+   im SQL-Editor ausführen (idempotent). Aktiviert pg_net, legt die
+   Funktion `trigger_region_scrape()` und den Trigger `on_region_insert` an.
+
+**Debugging:** pg_net ist asynchron — das Ergebnis des Calls landet erst
+in `net._http_response`:
+
+```sql
+select * from net._http_response order by id desc limit 5;
+```
+
+Erfolg = Status 204. Häufige Fehler: 401 (PAT abgelaufen/falsch),
+404 (PAT ohne Zugriff aufs Repo), 403 ohne `User-Agent`-Header (setzt die
+Funktion bereits). Fehlt das Vault-Secret oder schlägt der Call fehl,
+wird der INSERT trotzdem durchgelassen (nur `raise warning`).
+
+**PAT rotieren:** neues Token erzeugen, dann im SQL-Editor
+
+```sql
+select vault.update_secret(
+  (select id from vault.secrets where name = 'github_pat'),
+  '<neuer PAT>');
+```
+
+— oder einfacher: Secret im Dashboard unter „Vault" aktualisieren.
+Die Migration muss dafür nicht neu laufen.
+
 ## Zeitplan
 
 Der Nightly-Lauf startet per Cron um **04:30 UTC**:
