@@ -1,4 +1,6 @@
 use anyhow::{Context, Result, bail};
+
+use crate::scrapers::util::curl_get;
 use scraper::{ElementRef, Html, Selector};
 use std::collections::HashSet;
 
@@ -21,58 +23,16 @@ use crate::models::{Market, Offer};
 // Achtung Akamai: Der Bot-Schutz fingerprintet den TLS-Stack — reqwest/rustls
 // wird konsequent mit HTTP 403 geblockt, curl mit vollem Browser-Header-Satz
 // (User-Agent + Accept + Sec-Fetch-*) kommt durch (verifiziert 2026-07).
-// Deshalb laufen die Requests hier über das System-curl (Präzedenzfall:
-// rewe.rs shellt zum rewerse-CLI aus), mit bis zu 3 Versuchen pro URL.
+// Deshalb laufen die Requests über util::curl_get (System-curl).
 
 const BASE: &str = "https://www.netto-online.de";
 const STORE_FINDER_PATH: &str =
     "/INTERSHOP/web/WFS/Plus-NettoDE-Site/de_DE/-/EUR/ViewMMPStoreFinder-GetStoreByPostcode";
 const OFFER_PAGES: &[u32] = &[1, 2, 4, 5];
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
-const RETRIES: u32 = 3;
-
-// GET über System-curl mit Browser-Fingerprint-Headern und Retry gegen
-// sporadische Akamai-403. Liefert den Response-Body als String.
-fn get_with_retry(url: &str, extra: &[(&str, &str)]) -> Result<String> {
-    for attempt in 0..RETRIES {
-        if attempt > 0 {
-            std::thread::sleep(std::time::Duration::from_secs(3));
-        }
-        let mut cmd = std::process::Command::new("curl");
-        cmd.arg("-s")
-            .arg("-L")
-            .arg("--compressed")
-            .arg("--max-time")
-            .arg("30")
-            .arg("-w")
-            .arg("\n%{http_code}")
-            .args(["-H", &format!("User-Agent: {USER_AGENT}")])
-            .args(["-H", "Accept-Language: de-DE,de;q=0.9,en;q=0.8"])
-            .args(["-H", "Accept-Encoding: gzip, deflate, br"])
-            .args(["-H", "Upgrade-Insecure-Requests: 1"]);
-        for (k, v) in extra {
-            cmd.args(["-H", &format!("{k}: {v}")]);
-        }
-        let output = cmd
-            .arg(url)
-            .output()
-            .context("curl nicht gefunden — wird für den Netto-Scraper benötigt")?;
-
-        let body = String::from_utf8_lossy(&output.stdout);
-        let (content, status) = match body.rsplit_once('\n') {
-            Some((c, s)) => (c, s.trim()),
-            None => continue,
-        };
-        if status == "200" {
-            return Ok(content.to_string());
-        }
-    }
-    bail!("Netto lieferte wiederholt Fehler für {url} (Akamai-Blockade?)")
-}
 
 pub fn find_market(zip: &str) -> Result<Market> {
     let url = format!("{BASE}{STORE_FINDER_PATH}?postalcode={zip}&searchradius=25");
-    let body = get_with_retry(
+    let body = curl_get(
         &url,
         &[
             ("Accept", "application/json, text/javascript, */*; q=0.01"),
@@ -115,7 +75,7 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
 
     for page in OFFER_PAGES {
         let url = format!("{BASE}/filialangebote/{page}");
-        let html = match get_with_retry(
+        let html = match curl_get(
             &url,
             &[
                 ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"),
