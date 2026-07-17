@@ -54,6 +54,15 @@ pub fn chain_for(market: &Market) -> Option<&'static str> {
         ("lidl", "Lidl"),
         ("netto", "Netto"),
         ("edeka", "EDEKA"),
+        // EDEKA-Vertriebsmarken tragen "edeka" nicht immer im Namen
+        ("e center", "EDEKA"),
+        ("e-center", "EDEKA"),
+        ("e neukauf", "EDEKA"),
+        ("e aktiv", "EDEKA"),
+        ("e xpress", "EDEKA"),
+        ("marktkauf", "EDEKA"),
+        ("nah & gut", "EDEKA"),
+        ("nah und gut", "EDEKA"),
     ];
     chains.iter().find(|(n, _)| hay.contains(n)).map(|(_, c)| *c)
 }
@@ -64,13 +73,30 @@ fn product_name(offer: &Offer) -> String {
     match &offer.subtitle {
         Some(sub)
             if !sub.is_empty()
-                && units::parse_quantity(sub).is_none()
+                && !is_pure_quantity(sub)
                 && !offer.title.to_lowercase().contains(&sub.to_lowercase()) =>
         {
             format!("{} {}", offer.title, sub)
         }
         _ => offer.title.clone(),
     }
+}
+
+// Ein Untertitel ist nur dann reiner Mengen-Text, wenn er außer Zahlen nichts
+// als Einheiten-/Verpackungswörter enthält ("je 250-g-Packg."). Texte wie
+// "Rispentomaten, 500-g-Schale" tragen den Produktnamen und müssen erhalten
+// bleiben — units::parse_quantity findet auch dort eine Menge und reicht als
+// Kriterium deshalb nicht.
+fn is_pure_quantity(text: &str) -> bool {
+    const FILLER: &[&str] = &[
+        "je", "ca", "x", "g", "kg", "mg", "ml", "cl", "l", "stück", "stk", "er", "packg",
+        "packung", "pack", "dose", "flasche", "beutel", "schale", "netz", "becher", "glas",
+        "tafel", "riegel", "rolle", "portion",
+    ];
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|t| !t.is_empty())
+        .all(|t| FILLER.contains(&t))
 }
 
 /// Lokales Angebot in eine Supabase-Zeile mappen. None bei Angeboten ohne
