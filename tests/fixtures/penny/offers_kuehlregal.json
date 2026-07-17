@@ -1,0 +1,100 @@
+{
+ "offerTiles": [
+  {
+   "title": "MÖVENPICK Feinjoghurt",
+   "quantity": "je 150 g",
+   "price": "0.77",
+   "crossOutPrice": "0.99",
+   "imageRendition": {
+    "tileXs": "https://cdn.penny.de/dam/jcr:ed60dc7c-e713-4b25-a689-9ea909ea2127/56622711.png?impolicy=penny&imwidth=150",
+    "tileSm": "https://cdn.penny.de/dam/jcr:ed60dc7c-e713-4b25-a689-9ea909ea2127/56622711.png?impolicy=penny&imwidth=250",
+    "tileMd": "https://cdn.penny.de/dam/jcr:ed60dc7c-e713-4b25-a689-9ea909ea2127/56622711.png?impolicy=penny&imwidth=350",
+    "tileLg": "https://cdn.penny.de/dam/jcr:ed60dc7c-e713-4b25-a689-9ea909ea2127/56622711.png?impolicy=penny&imwidth=450",
+    "tileXl": "https://cdn.penny.de/dam/jcr:ed60dc7c-e713-4b25-a689-9ea909ea2127/56622711.png?impolicy=penny&imwidth=600",
+    "imageAlt": "MEGGLE Streichzart ungesalzen* 1.39",
+    "imageTitle": "MEGGLE Streichzart ungesalzen* 1.39 je 250 g (1 kg = 5.56)"
+   },
+   "uuid": "0adaf5fc-be93-40c2-9af9-c91edc020dc3"
+  },
+  {
+   "title": "MILRAM Quark",
+   "quantity": "je 185 g",
+   "price": "0.99",
+   "originalPrice": "1.45",
+   "imageRendition": {
+    "tileXs": "https://cdn.penny.de/dam/jcr:da9a04af-455b-4859-b64d-264dd332aadd/30823410.png?impolicy=penny&imwidth=150",
+    "tileSm": "https://cdn.penny.de/dam/jcr:da9a04af-455b-4859-b64d-264dd332aadd/30823410.png?impolicy=penny&imwidth=250",
+    "tileMd": "https://cdn.penny.de/dam/jcr:da9a04af-455b-4859-b64d-264dd332aadd/30823410.png?impolicy=penny&imwidth=350",
+    "tileLg": "https://cdn.penny.de/dam/jcr:da9a04af-455b-4859-b64d-264dd332aadd/30823410.png?impolicy=penny&imwidth=450",
+    "tileXl": "https://cdn.penny.de/dam/jcr:da9a04af-455b-4859-b64d-264dd332aadd/30823410.png?impolicy=penny&imwidth=600",
+    "imageAlt": "MILRAM Quark 0.99",
+    "imageTitle": "MILRAM Quark 0.99 (1 kg = 5.35)"
+   },
+   "uuid": "681e51a0-409e-4d26-950e-2dbd63d9c462"
+  },
+  {
+   "title": "BEL BRANDS Mini Babybel*",
+   "quantity": "je 180 g",
+   "price": "2.99",
+   "originalPrice": "4.29",
+   "imageRendition": {
+    "tileXs": "https://cdn.penny.de/dam/jcr:9b69b7ee-2074-4b4e-ac84-ec384ac109c6/28335382.png?impolicy=penny&imwidth=150",
+    "tileSm": "https://cdn.penny.de/dam/jcr:9b69b7ee-2074-4b4e-ac84-ec384ac109c6/28335382.png?impolicy=penny&imwidth=250",
+    "tileMd": "https://cdn.penny.de/dam/jcr:9b69b7ee-2074-4b4e-ac84-ec384ac109c6/28335382.png?impolicy=penny&imwidth=350",
+    "tileLg": "https://cdn.penny.de/dam/jcr:9b69b7ee-2074-4b4e-ac84-ec384ac109c6/28335382.png?impolicy=penny&imwidth=450",
+    "tileXl": "https://cdn.penny.de/dam/jcr:9b69b7ee-2074-4b4e-ac84-ec384ac109c6/28335382.png?impolicy=penny&imwidth=600",
+    "imageAlt": "BEL BRANDSMini Babybel* 2.99",
+    "imageTitle": "BEL BRANDSMini Babybel* 2.99 (1 kg = 18.69)"
+   },
+   "uuid": "803bf8b9-d119-46c2-a20d-130485467d30"
+  },
+  {
+   "title": "MILPRIMA Schmand",
+   "quantity": "je 200 g",
+   "price": "0.69*",
+   "crossOutPrice": "0.79",
+   "imageRendition": {
+    "tileXs": "https://cdn.penny.de/dam/jcr:889ff56d-9b7e-4861-a1cc-ed0ab84a38d4/45956917.png?impolicy=penny&imwidth=150",
+    "tileSm": "https://cdn.penny.de/dam/jcr:889ff56d-9b7e-4861-a1cc-ed0ab84a38d4/45956917.png?impolicy=penny&imwidth=250",
+    "tileMd": "https://cdn.penny.de/dam/jcr:889ff56d-9b7e-4861-a1cc-ed0ab84a38d4/45956917.png?impolicy=penny&imwidth=350",
+    "tileLg": "https://cdn.penny.de/dam/jcr:889ff56d-9b7e-4861-a1cc-ed0ab84a38d4/45956917.png?impolicy=penny&imwidth=450",
+    "tileXl": "https://cdn.penny.de/dam/jcr:889ff56d-9b7e-4861-a1cc-ed0ab84a38d4/45956917.png?impolicy=penny&imwidth=600",
+    "imageAlt": "MILPRIMA Schmand 0.69*",
+    "imageTitle": "MILPRIMA Schmand 0.69* je 200 g 0.79 (1 kg = 3.95)"
+   },
+   "uuid": "43a5c357-b337-48e2-8a9c-c1f4fa6a86f8"
+  },
+  {
+   "title": "MILPRIMA Reine Buttermilch",
+   "quantity": "je 500 g",
+   "price": "0.49*",
+   "crossOutPrice": "0.59",
+   "imageRendition": {
+    "tileXs": "https://cdn.penny.de/dam/jcr:32d8b54e-9508-42bd-91ee-351f7ee7490c/46844590.png?impolicy=penny&imwidth=150",
+    "tileSm": "https://cdn.penny.de/dam/jcr:32d8b54e-9508-42bd-91ee-351f7ee7490c/46844590.png?impolicy=penny&imwidth=250",
+    "tileMd": "https://cdn.penny.de/dam/jcr:32d8b54e-9508-42bd-91ee-351f7ee7490c/46844590.png?impolicy=penny&imwidth=350",
+    "tileLg": "https://cdn.penny.de/dam/jcr:32d8b54e-9508-42bd-91ee-351f7ee7490c/46844590.png?impolicy=penny&imwidth=450",
+    "tileXl": "https://cdn.penny.de/dam/jcr:32d8b54e-9508-42bd-91ee-351f7ee7490c/46844590.png?impolicy=penny&imwidth=600",
+    "imageAlt": "MILPRIMA Reine Buttermilch 0.49*",
+    "imageTitle": "MILPRIMA Reine Buttermilch 0.49* je 500 g 0.59 (1 kg = 1.18)"
+   },
+   "uuid": "4347e080-2f41-40f6-a451-7878acd7c3c4"
+  },
+  {
+   "title": "INNOCENT Smoothie",
+   "quantity": "je 250 ml",
+   "price": "1.69*",
+   "crossOutPrice": "2.29",
+   "imageRendition": {
+    "tileXs": "https://cdn.penny.de/dam/jcr:6700a71a-67c2-4ec0-8208-2c0bcf275ae9/33646557.png?impolicy=penny&imwidth=150",
+    "tileSm": "https://cdn.penny.de/dam/jcr:6700a71a-67c2-4ec0-8208-2c0bcf275ae9/33646557.png?impolicy=penny&imwidth=250",
+    "tileMd": "https://cdn.penny.de/dam/jcr:6700a71a-67c2-4ec0-8208-2c0bcf275ae9/33646557.png?impolicy=penny&imwidth=350",
+    "tileLg": "https://cdn.penny.de/dam/jcr:6700a71a-67c2-4ec0-8208-2c0bcf275ae9/33646557.png?impolicy=penny&imwidth=450",
+    "tileXl": "https://cdn.penny.de/dam/jcr:6700a71a-67c2-4ec0-8208-2c0bcf275ae9/33646557.png?impolicy=penny&imwidth=600",
+    "imageAlt": "INNOCENT Smoothie 1.69*",
+    "imageTitle": "INNOCENT Smoothie 1.69* je 250 ml 2.29 (1 l = 9.16)"
+   },
+   "uuid": "f28c39a0-df30-4968-95c2-e696a3934f07"
+  }
+ ]
+}

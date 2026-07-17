@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 
 use crate::models::{Market, Offer};
+use crate::scrapers::util;
 
 // Lidl-Angebote über die öffentliche Such-API des Onlineshops (kein Login nötig).
 //
@@ -19,7 +20,6 @@ use crate::models::{Market, Offer};
 // deshalb unabhängig von der PLZ einen synthetischen National-Markt.
 
 const SEARCH_URL: &str = "https://www.lidl.de/q/api/search";
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36";
 const PAGE_SIZE: usize = 200;
 const MAX_OFFERS: usize = 2000;
 
@@ -30,10 +30,7 @@ pub fn find_market(_zip: &str) -> Result<Market> {
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
     block_on(async {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .build()
-            .context("HTTP-Client konnte nicht erstellt werden")?;
+        let client = util::async_client()?;
 
         let mut offers = Vec::new();
         let mut seen = HashSet::new();
@@ -44,21 +41,22 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
                 "{SEARCH_URL}?assortment=DE&locale=de_DE&version=v2.0.0&store=1&fetchsize={PAGE_SIZE}&offset={offset}"
             );
 
+            util::polite_pause(&url);
             let resp = client
                 .get(&url)
                 .header("Accept", "application/json, text/plain, */*")
                 .send()
                 .await
-                .with_context(|| format!("Lidl-Such-API-Request fehlgeschlagen: {url}"))?;
+                .with_context(|| util::ctx("Lidl", "Angebote laden", &url))?;
 
             if !resp.status().is_success() {
-                bail!("Lidl-Such-API lieferte HTTP {} für {url}", resp.status());
+                bail!("[Lidl] Angebote laden lieferte HTTP {}: {url}", resp.status());
             }
 
             let raw: serde_json::Value = resp
                 .json()
                 .await
-                .context("Lidl-Such-API JSON parse fehlgeschlagen")?;
+                .with_context(|| util::ctx("Lidl", "Angebote JSON parsen", &url))?;
 
             let num_found = raw.get("numFound").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let items = raw
@@ -91,7 +89,7 @@ pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
 
 // Ein Produkt-Tile defensiv in ein Offer übersetzen; bei fehlenden
 // Pflichtfeldern None (Tile wird übersprungen).
-fn parse_tile(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
+pub fn parse_tile(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
     let data = item.get("gridbox")?.get("data")?;
 
     let title = data
@@ -101,7 +99,13 @@ fn parse_tile(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
         .filter(|s| !s.is_empty())?
         .to_string();
 
-    let price_obj = data.get("price");
+    // Lidl-Plus-exklusive Angebote tragen ihren Preis nicht in data.price
+    // (dort steht nur eine leere Hülle mit currencyCode), sondern in
+    // data.lidlPlus[0].price — daher der Fallback.
+    let price_obj = data
+        .get("price")
+        .filter(|p| p.get("price").is_some())
+        .or_else(|| item.pointer("/gridbox/data/lidlPlus/0/price"));
     let price = price_obj.and_then(|p| p.get("price")).and_then(|v| v.as_f64());
     let regular_price = price_obj
         .and_then(|p| p.get("oldPrice"))
@@ -120,6 +124,14 @@ fn parse_tile(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
             let amount = pack.get("amount")?.as_f64()?;
             let unit = pack.get("unit")?.as_str()?;
             Some(format!("{amount} {unit}"))
+        })
+        .or_else(|| {
+            // Lidl-Plus-Preise haben nur einen Freitext ("Je Stück")
+            price_obj?
+                .get("packaging")?
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(String::from)
         })
         .or_else(|| {
             price_obj?
