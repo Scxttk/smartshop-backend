@@ -224,16 +224,26 @@ wurde einmalig im Supabase SQL-Editor ausgeführt (siehe
 | Rewe | ja — TLS-Cert + `rewerse` | filialspezifisch (PLZ) | variiert je Filiale |
 | Penny | nein | filialspezifisch (PLZ) | ~540 |
 | Kaufland | nein | filialspezifisch (PLZ) | variiert (nicht jede PLZ) |
-| Lidl | nein | national | ~470 |
+| Lidl | nein | national¹ | ~470 |
 | Netto | nein (curl) | filialspezifisch (PLZ) | ~190 |
-| ALDI Nord | nein | national | ~240 |
-| ALDI Süd | nein (curl) | national | ~75 |
+| ALDI Nord | nein | national¹ | ~240 |
+| ALDI Süd | nein (curl) | national¹ | ~75 |
 | EDEKA | nein (curl) | filialspezifisch (PLZ) | variiert (nicht jede Region) |
 
 Ballpark-Zahlen aus einem Live-Abruf für PLZ 50667 (Köln) am 2026-07-17;
 tatsächliche Zahlen schwanken pro Woche und Filiale. Kaufland und EDEKA lieferten
 für diese PLZ keinen Treffer — beide sind regionsabhängig. Rewe wurde mangels
 Zertifikat nicht live gemessen.
+
+¹ Die *Angebote* sind national, die *Präsenz* nicht mehr: `find_market` fragt
+den offiziellen Filialfinder der Kette (Lidl: Bing Spatial Data Service hinter
+lidl.de, ALDI Nord/SÜD: Uberall-Locator; PLZ-Geocoding via Nominatim,
+`src/scrapers/store_finder.rs`). Gibt es im Umkreis von 15 km eine Filiale,
+wird sie mit Name, ID und Koordinaten registriert; sonst wird die Kette für
+die Region gar nicht registriert. Scheitert der Finder selbst (Netz,
+Formatänderung), fällt der Sync mit WARN auf den nationalen Platzhalter
+zurück. Penny und Kaufland liefern ihre Filial-Koordinaten ohnehin mit —
+`markets.lat/lon` (migration_v8) trägt sie, NULL wo unbekannt.
 
 ## HTTP-API-Endpoints
 
