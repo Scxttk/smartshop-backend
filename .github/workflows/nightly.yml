@@ -88,3 +88,4 @@ jobs:
           path: nightly.log
           if-no-files-found: ignore
           retention-days: 7
+# (touch: force GitHub workflow registration)
