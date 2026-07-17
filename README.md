@@ -159,10 +159,34 @@ smartshop push --dry-run                       # nur zeigen, kein Netzwerk
 `--region <PLZ>` ist Pflicht (außer bei `--dry-run`). Für den wöchentlichen
 Sync per Cron einfach nach dem Abruf pushen:
 
-Für den regelmäßigen Sync übernimmt `scripts/nightly.sh` fetch + push +
+Für den regelmäßigen Sync übernimmt `scripts/nightly.sh` sync-regions +
 Watchlist-Check in einem Rutsch; auf macOS installiert
 `scripts/install-launchd.sh` den fertigen Nacht-Agent — siehe
 [docs/automation.md](docs/automation.md).
+
+### sync-regions — Multi-Region-Sync
+
+Liest alle aktiven Regionen aus der Supabase-Tabelle `public.regions`
+(sortiert nach `requested_at`, älteste Anfrage zuerst) und macht pro PLZ den
+kompletten Durchlauf: alle Ketten fetchen, gefundene Filialen nach
+`public.markets` melden, Angebote mit `--region <PLZ>` pushen. Die lokale
+`offers`-Tabelle wird pro Region geleert, damit keine Angebote fremder
+Regionen mitgepusht werden.
+
+```sh
+export SUPABASE_URL="https://xyz.supabase.co"
+export SUPABASE_SERVICE_KEY="…"
+
+smartshop sync-regions                          # bis zu 10 Regionen
+smartshop sync-regions --max-regions 3          # Limit ändern
+smartshop sync-regions --dry-run                # keine Supabase-Writes
+```
+
+Fehler einzelner Regionen brechen den Lauf nicht ab; Exit-Code ≠ 0 nur,
+wenn alle Regionen scheitern oder die Tabelle leer/unerreichbar ist.
+Voraussetzung: die Migration `supabase/migration_v3_multi_region.sql`
+wurde einmalig im Supabase SQL-Editor ausgeführt (siehe
+[docs/ci.md](docs/ci.md)).
 
 ## Scraper-Unterstützung
 
@@ -229,9 +253,15 @@ migriert beim Öffnen automatisch auf die aktuelle Version. Schema-Änderungen
 erhöhen `SCHEMA_VERSION` und ergänzen einen Migrationsschritt in `migrate()`
 (`src/db.rs`) — bestehende Datenbanken werden dabei in-place aktualisiert.
 
+Das Supabase-Schema (Tabellen `offers`, `regions`, `markets`) liegt kanonisch
+unter [`supabase/`](supabase/) — `schema.sql` + Migrationen; neue Projekte:
+`setup_full.sql`, dann `migration_regions.sql`, dann
+`migration_v3_multi_region.sql` im SQL-Editor ausführen.
+
 ## Dokumentation
 
 - [docs/rewe-cert.md](docs/rewe-cert.md) — Rewe-TLS-Zertifikat einrichten
 - [docs/automation.md](docs/automation.md) — nächtlicher launchd-Agent (macOS)
 - [docs/cron.md](docs/cron.md) — Cron-Automatisierung und JSON-API
-- [scripts/nightly.sh](scripts/nightly.sh) — Pipeline-Skript fetch + push + watch check
+- [docs/ci.md](docs/ci.md) — GitHub-Actions-CI, Nightly-Sync und Migrationen
+- [scripts/nightly.sh](scripts/nightly.sh) — Pipeline-Skript sync-regions + watch check (mit Einzel-PLZ-Fallback)
