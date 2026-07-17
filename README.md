@@ -159,10 +159,10 @@ smartshop push --dry-run                       # nur zeigen, kein Netzwerk
 `--region <PLZ>` ist Pflicht (außer bei `--dry-run`). Für den wöchentlichen
 Sync per Cron einfach nach dem Abruf pushen:
 
-```cron
-0 6 * * 1 SMARTSHOP_ZIP=01219 /pfad/zu/scripts/fetch-all.sh && \
-  SUPABASE_URL=… SUPABASE_SERVICE_KEY=… smartshop push --region 01219 --db ~/.local/share/smartshop/smartshop.db
-```
+Für den regelmäßigen Sync übernimmt `scripts/nightly.sh` fetch + push +
+Watchlist-Check in einem Rutsch; auf macOS installiert
+`scripts/install-launchd.sh` den fertigen Nacht-Agent — siehe
+[docs/automation.md](docs/automation.md).
 
 ## Scraper-Unterstützung
 
@@ -232,5 +232,6 @@ erhöhen `SCHEMA_VERSION` und ergänzen einen Migrationsschritt in `migrate()`
 ## Dokumentation
 
 - [docs/rewe-cert.md](docs/rewe-cert.md) — Rewe-TLS-Zertifikat einrichten
-- [docs/cron.md](docs/cron.md) — Cron/launchd-Automatisierung und JSON-API
-- [scripts/fetch-all.sh](scripts/fetch-all.sh) — cron-fertiger Abruf-Wrapper
+- [docs/automation.md](docs/automation.md) — nächtlicher launchd-Agent (macOS)
+- [docs/cron.md](docs/cron.md) — Cron-Automatisierung und JSON-API
+- [scripts/nightly.sh](scripts/nightly.sh) — Pipeline-Skript fetch + push + watch check
