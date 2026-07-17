@@ -13,3 +13,4 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 scraper = "0.20"
+regex = "1.13.1"

@@ -59,6 +59,14 @@ pub fn upsert_market(conn: &Connection, market: &Market) -> Result<()> {
     Ok(())
 }
 
+pub fn markets(conn: &Connection) -> Result<Vec<Market>> {
+    let mut stmt = conn.prepare("SELECT id, name FROM markets ORDER BY name")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Market { id: row.get(0)?, name: row.get(1)? })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 pub struct PricePoint {
     pub title: String,
     pub market_id: String,
@@ -113,6 +121,40 @@ pub fn search_offers(conn: &Connection, query: &str, max_price: Option<f64>) -> 
         })
     })?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+// Wie search_offers, aber Titel UND Untertitel durchsuchen — manche Scraper
+// (z. B. Kaufland) speichern die Marke im Titel und das Produkt im Untertitel.
+pub fn search_offers_broad(conn: &Connection, query: &str) -> Result<Vec<Offer>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, market_id, title, subtitle, overline, price, regular_price,
+                category, nutri_score, valid_from, valid_until, images, biozid, flyer_page
+         FROM offers
+         WHERE title LIKE '%' || ?1 || '%' OR subtitle LIKE '%' || ?1 || '%'
+         ORDER BY price ASC",
+    )?;
+    let rows = stmt.query_map(params![query], row_to_offer)?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+fn row_to_offer(row: &rusqlite::Row) -> rusqlite::Result<Offer> {
+    let images_json: String = row.get(11)?;
+    Ok(Offer {
+        id: row.get(0)?,
+        market_id: row.get(1)?,
+        title: row.get(2)?,
+        subtitle: row.get(3)?,
+        overline: row.get(4)?,
+        price: row.get(5)?,
+        regular_price: row.get(6)?,
+        category: row.get(7)?,
+        nutri_score: row.get(8)?,
+        valid_from: row.get(9)?,
+        valid_until: row.get(10)?,
+        images: serde_json::from_str(&images_json).unwrap_or_default(),
+        biozid: row.get::<_, i64>(12)? != 0,
+        flyer_page: row.get(13)?,
+    })
 }
 
 pub fn upsert_offer(conn: &Connection, offer: &Offer) -> Result<()> {
