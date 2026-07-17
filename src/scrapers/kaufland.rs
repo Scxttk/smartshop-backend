@@ -111,7 +111,13 @@ fn parse_offers(html: &str, market_id: &str) -> Result<Vec<Offer>> {
                 }
             }
 
-            let id = Offer::build_id(market_id, &title, valid_from.as_deref());
+            // Kaufland: Titel ist die Marke, das Produkt steht im Untertitel —
+            // ohne ihn kollidieren alle Angebote einer Marke auf derselben ID
+            let id_key = match &subtitle {
+                Some(s) if !s.is_empty() => format!("{title} {s}"),
+                _ => title.clone(),
+            };
+            let id = Offer::build_id(market_id, &id_key, valid_from.as_deref());
 
             offers.push(Offer {
                 id,
