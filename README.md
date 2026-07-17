@@ -140,6 +140,30 @@ smartshop serve --port 8080
 Das Web-Dashboard liegt auf `/`, die JSON-Endpoints unter `/api/*`
 (siehe unten und [docs/cron.md](docs/cron.md)).
 
+### push — Supabase-Push
+
+Lädt die gespeicherten Angebote in die Supabase-Tabelle `public.offers`
+(PostgREST-Upsert auf `market,product,valid_from,region`, Batches à 100) und
+trägt die PLZ in `public.regions` ein. Veraltete Wochen des jeweiligen Markts
+werden vorher gelöscht. Angebote ohne Preis werden übersprungen.
+
+```sh
+export SUPABASE_URL="https://xyz.supabase.co"
+export SUPABASE_SERVICE_KEY="…"   # Service-Role-Key, nicht der anon key
+
+smartshop push --region 01219                  # alle Märkte
+smartshop push --store lidl --region 01219     # nur eine Kette
+smartshop push --dry-run                       # nur zeigen, kein Netzwerk
+```
+
+`--region <PLZ>` ist Pflicht (außer bei `--dry-run`). Für den wöchentlichen
+Sync per Cron einfach nach dem Abruf pushen:
+
+```cron
+0 6 * * 1 SMARTSHOP_ZIP=01219 /pfad/zu/scripts/fetch-all.sh && \
+  SUPABASE_URL=… SUPABASE_SERVICE_KEY=… smartshop push --region 01219 --db ~/.local/share/smartshop/smartshop.db
+```
+
 ## Scraper-Unterstützung
 
 | Kette | Auth nötig | Markt | Angebote (ballpark) |
