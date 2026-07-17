@@ -40,8 +40,9 @@ fn map_basic_fields() {
     assert_eq!(row.price, 1.99);
     assert_eq!(row.regular_price, Some(2.79));
     assert_eq!(row.unit, "Stück");
-    assert_eq!(row.category.as_deref(), Some("Molkerei"));
-    assert_eq!(row.emoji, None);
+    // Rohkategorie "Molkerei" wird normalisiert, Emoji aus der Keyword-Tabelle
+    assert_eq!(row.category.as_deref(), Some("Molkerei & Eier"));
+    assert_eq!(row.emoji.as_deref(), Some("🧀"));
     assert_eq!(row.valid_from.as_deref(), Some("2026-07-13"));
     assert_eq!(row.valid_until.as_deref(), Some("2026-07-19"));
     assert_eq!(row.brand, None);
@@ -119,7 +120,7 @@ fn map_serializes_to_expected_json() {
     let v = serde_json::to_value(&row).unwrap();
     assert_eq!(v["market"], "REWE");
     assert_eq!(v["price"], 1.99);
-    assert_eq!(v["emoji"], serde_json::Value::Null);
+    assert_eq!(v["emoji"], "🧀");
     assert_eq!(v["source"], "smartshop-rust");
     assert_eq!(v["region"], "01219");
 }
