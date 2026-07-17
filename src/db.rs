@@ -6,7 +6,7 @@ use crate::models::{Market, Offer};
 /// Aktuelle Schema-Version (PRAGMA user_version). Zukünftige Schema-Änderungen
 /// müssen SCHEMA_VERSION erhöhen und in migrate() einen Migrationsschritt
 /// von der Vorversion ergänzen.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 pub fn open(path: &str) -> Result<Connection> {
     let conn = Connection::open(path)?;
@@ -32,6 +32,7 @@ fn migrate(conn: &Connection) -> Result<()> {
             // init_schema ist idempotent (CREATE IF NOT EXISTS) und entspricht v1.
             0 => init_schema(conn)?,
             1 => migrate_v1_to_v2(conn)?,
+            2 => migrate_v2_to_v3(conn)?,
             v => bail!("Unbekannte Schema-Version {v} — keine Migration definiert."),
         }
         version += 1;
@@ -92,6 +93,55 @@ fn init_schema(conn: &Connection) -> Result<()> {
             ON price_history (title);
     ")?;
     Ok(())
+}
+
+// v3: Einkaufsliste
+fn migrate_v2_to_v3(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS shopping_list (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            item     TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            added_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );",
+    )?;
+    Ok(())
+}
+
+pub struct ListItem {
+    pub id: i64,
+    pub item: String,
+    pub added_at: String,
+}
+
+/// true, wenn das Item neu aufgenommen wurde (false = stand schon drauf)
+pub fn list_add(conn: &Connection, item: &str) -> Result<bool> {
+    let n = conn.execute(
+        "INSERT OR IGNORE INTO shopping_list (item) VALUES (?1)",
+        params![item],
+    )?;
+    Ok(n > 0)
+}
+
+/// true, wenn ein Item entfernt wurde
+pub fn list_remove(conn: &Connection, item: &str) -> Result<bool> {
+    let n = conn.execute(
+        "DELETE FROM shopping_list WHERE item = ?1 COLLATE NOCASE",
+        params![item],
+    )?;
+    Ok(n > 0)
+}
+
+pub fn list_items(conn: &Connection) -> Result<Vec<ListItem>> {
+    let mut stmt = conn.prepare("SELECT id, item, added_at FROM shopping_list ORDER BY id")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(ListItem { id: row.get(0)?, item: row.get(1)?, added_at: row.get(2)? })
+    })?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// Anzahl entfernter Items
+pub fn list_clear(conn: &Connection) -> Result<usize> {
+    Ok(conn.execute("DELETE FROM shopping_list", [])?)
 }
 
 pub struct Watch {
