@@ -112,6 +112,11 @@ enum Command {
         #[command(subcommand)]
         action: WatchAction,
     },
+    /// Einkaufsliste verwalten und günstigste Angebote finden
+    List {
+        #[command(subcommand)]
+        action: ListAction,
+    },
     /// Preisverlauf eines Produkts anzeigen
     History {
         /// Suchbegriff (Teilstring des Titels)
@@ -161,6 +166,46 @@ enum WatchAction {
     },
 }
 
+#[derive(Subcommand)]
+enum ListAction {
+    /// Artikel auf die Einkaufsliste setzen
+    Add {
+        /// Artikelname
+        item: String,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
+    /// Artikel von der Einkaufsliste entfernen
+    Remove {
+        /// Artikelname
+        item: String,
+
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
+    /// Einkaufsliste anzeigen
+    Show {
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
+    /// Einkaufsliste leeren
+    Clear {
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
+    /// Für jeden Artikel zeigen, wo er diese Woche am günstigsten ist
+    Suggest {
+        /// Pfad zur SQLite-Datenbank
+        #[arg(long, default_value = "smartshop.db")]
+        db: String,
+    },
+}
+
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Fetch { zip, store, all_stores, cert, key, dry_run, notify, db } => {
@@ -179,6 +224,7 @@ fn main() -> Result<()> {
         Command::Export { format, query, out, db } => export(format, query, out, db),
         Command::Stats { db } => stats(db),
         Command::Watch { action } => watch(action),
+        Command::List { action } => shopping_list(action),
         Command::History { query, db } => history(query, db),
     }
 }
@@ -209,6 +255,111 @@ fn print_watch_hits(conn: &rusqlite::Connection) -> Result<bool> {
         }
     }
     Ok(any)
+}
+
+fn shopping_list(action: ListAction) -> Result<()> {
+    match action {
+        ListAction::Add { item, db } => {
+            let conn = db::open(&db)?;
+            if db::list_add(&conn, &item)? {
+                println!("'{item}' auf die Einkaufsliste gesetzt.");
+            } else {
+                println!("'{item}' steht schon auf der Einkaufsliste.");
+            }
+            Ok(())
+        }
+        ListAction::Remove { item, db } => {
+            let conn = db::open(&db)?;
+            if db::list_remove(&conn, &item)? {
+                println!("'{item}' von der Einkaufsliste entfernt.");
+            } else {
+                println!("'{item}' steht nicht auf der Einkaufsliste.");
+            }
+            Ok(())
+        }
+        ListAction::Show { db } => {
+            let conn = db::open(&db)?;
+            let items = db::list_items(&conn)?;
+            if items.is_empty() {
+                println!("Einkaufsliste ist leer. Mit `smartshop list add <Artikel>` befüllen.");
+                return Ok(());
+            }
+            println!("Einkaufsliste ({} Artikel):", items.len());
+            for it in &items {
+                println!("  - {}", it.item);
+            }
+            Ok(())
+        }
+        ListAction::Clear { db } => {
+            let conn = db::open(&db)?;
+            let n = db::list_clear(&conn)?;
+            println!("Einkaufsliste geleert ({n} Artikel entfernt).");
+            Ok(())
+        }
+        ListAction::Suggest { db } => suggest(&db),
+    }
+}
+
+/// Für jeden Listen-Artikel das günstigste passende Angebot über alle Märkte
+/// finden (Titel/Untertitel-Suche wie bei compare, Grundpreis aus units).
+fn suggest(db: &str) -> Result<()> {
+    let conn = db::open(db)?;
+    let items = db::list_items(&conn)?;
+    if items.is_empty() {
+        println!("Einkaufsliste ist leer. Mit `smartshop list add <Artikel>` befüllen.");
+        return Ok(());
+    }
+    let market_names: std::collections::HashMap<String, String> = db::markets(&conn)?
+        .into_iter()
+        .map(|m| (m.id, m.name))
+        .collect();
+
+    for it in &items {
+        let mut offers = db::search_offers_broad(&conn, &it.item)?;
+        offers.retain(|o| o.price.is_some());
+        let Some(best) = offers.first() else {
+            println!("{:<24} keine Angebote diese Woche", it.item);
+            continue;
+        };
+        let market = market_names
+            .get(&best.market_id)
+            .map(String::as_str)
+            .unwrap_or(best.market_id.as_str());
+        let unit = units::derive_unit_price(
+            best.price,
+            &[best.subtitle.as_deref(), best.overline.as_deref(), Some(&best.title)],
+        )
+        .map(|up| format!("  ({})", up.format()))
+        .unwrap_or_default();
+        println!(
+            "{:<24} {:.2} € bei {market} — {}{unit}",
+            it.item,
+            best.price.unwrap(),
+            display_name(best),
+        );
+        // Ersparnis gegenüber dem teuersten anderen Markt zeigen —
+        // nur für dasselbe Produkt (gleicher normalisierter Name)
+        let best_key = units::normalize_name(&display_name(best));
+        if let Some(worst) = offers
+            .iter()
+            .filter(|o| {
+                o.market_id != best.market_id
+                    && units::normalize_name(&display_name(o)) == best_key
+            })
+            .last()
+        {
+            if let (Some(bp), Some(wp)) = (best.price, worst.price) {
+                if wp > bp {
+                    let worst_market = market_names
+                        .get(&worst.market_id)
+                        .map(String::as_str)
+                        .unwrap_or(worst.market_id.as_str());
+                    println!("{:<24} spart {:.2} € gegenüber {worst_market}", "", wp - bp);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn watch(action: WatchAction) -> Result<()> {
