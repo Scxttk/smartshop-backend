@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# nightly.sh — kompletter nächtlicher smartshop-Lauf: fetch --all-stores,
-# danach push nach Supabase, danach watch check. Gedacht als Ziel für den
-# launchd-Agent (scripts/de.smartshop.nightly.plist), läuft aber genauso
-# von Hand oder aus cron.
+# nightly.sh — kompletter nächtlicher smartshop-Lauf: sync-regions (alle
+# aktiven Regionen aus Supabase: fetch + push pro PLZ), danach watch check.
+# Schlägt sync-regions fehl (Tabelle leer/unerreichbar, alle Regionen
+# gescheitert), fällt das Skript auf den alten Einzel-PLZ-Pfad zurück
+# (fetch --all-stores + push mit ZIP), damit die Pipeline nie dunkel geht.
+# Gedacht als Ziel für den launchd-Agent (scripts/de.smartshop.nightly.plist),
+# läuft aber genauso von Hand oder aus cron.
 #
 # Konfiguration kommt aus ~/.config/smartshop/env (siehe scripts/env.example).
-# Pflicht dort: ZIP, SUPABASE_URL, SUPABASE_SERVICE_KEY.
+# Pflicht dort: ZIP (Bootstrap-Fallback), SUPABASE_URL, SUPABASE_SERVICE_KEY.
 # Optional: DB, SMARTSHOP_BIN, REWE_CERT, REWE_KEY, NTFY_TOPIC.
 #
 # Logs: ~/Library/Logs/smartshop/nightly-JJJJMMTT-HHMMSS.log,
@@ -97,10 +100,9 @@ if [ -z "${SMARTSHOP_BIN:-}" ]; then
 fi
 [ -x "$SMARTSHOP_BIN" ] || fail "smartshop-Binary nicht ausführbar: $SMARTSHOP_BIN"
 
-if [ "$DRY_RUN" -eq 0 ]; then
-    [ -n "${SUPABASE_URL:-}" ] || fail "SUPABASE_URL ist in $ENV_FILE nicht gesetzt."
-    [ -n "${SUPABASE_SERVICE_KEY:-}" ] || fail "SUPABASE_SERVICE_KEY ist in $ENV_FILE nicht gesetzt."
-fi
+# sync-regions liest die Regionsliste auch im Dry-Run aus Supabase.
+[ -n "${SUPABASE_URL:-}" ] || fail "SUPABASE_URL ist in $ENV_FILE nicht gesetzt."
+[ -n "${SUPABASE_SERVICE_KEY:-}" ] || fail "SUPABASE_SERVICE_KEY ist in $ENV_FILE nicht gesetzt."
 export SUPABASE_URL="${SUPABASE_URL:-}" SUPABASE_SERVICE_KEY="${SUPABASE_SERVICE_KEY:-}"
 
 # Rewe-Zertifikat ist optional; ohne läuft --all-stores durch, Rewe erscheint
@@ -123,14 +125,22 @@ run_step() {
 
 # --- Pipeline ----------------------------------------------------------------
 
-log "Start Nightly-Lauf (PLZ $ZIP, DB $DB, dry-run=$DRY_RUN)"
+log "Start Nightly-Lauf (Fallback-PLZ $ZIP, DB $DB, dry-run=$DRY_RUN)"
 
-run_step "fetch" "$SMARTSHOP_BIN" fetch --all-stores --zip "$ZIP" --db "$DB" \
-    ${CERT_ARGS[@]+"${CERT_ARGS[@]}"}
+SYNC_ARGS=(sync-regions --db "$DB" ${CERT_ARGS[@]+"${CERT_ARGS[@]}"})
+[ "$DRY_RUN" -eq 1 ] && SYNC_ARGS+=(--dry-run)
 
-PUSH_ARGS=(push --region "$ZIP" --db "$DB")
-[ "$DRY_RUN" -eq 1 ] && PUSH_ARGS+=(--dry-run)
-run_step "push" "$SMARTSHOP_BIN" "${PUSH_ARGS[@]}"
+log "Schritt 'sync-regions': ${SYNC_ARGS[*]}"
+if "$SMARTSHOP_BIN" "${SYNC_ARGS[@]}" 2>&1 | while IFS= read -r line; do log "  $line"; done; then
+    log "Schritt 'sync-regions' erfolgreich."
+else
+    log "WARNUNG: sync-regions fehlgeschlagen (Exit-Code ${PIPESTATUS[0]:-?}) — Fallback auf Einzel-PLZ $ZIP."
+    run_step "fetch (Fallback)" "$SMARTSHOP_BIN" fetch --all-stores --zip "$ZIP" --db "$DB" \
+        ${CERT_ARGS[@]+"${CERT_ARGS[@]}"}
+    PUSH_ARGS=(push --region "$ZIP" --db "$DB")
+    [ "$DRY_RUN" -eq 1 ] && PUSH_ARGS+=(--dry-run)
+    run_step "push (Fallback)" "$SMARTSHOP_BIN" "${PUSH_ARGS[@]}"
+fi
 
 # Watchlist prüfen: Exit-Code 1 = Treffer -> Benachrichtigung (kein Fehler).
 log "Schritt 'watch check':"
