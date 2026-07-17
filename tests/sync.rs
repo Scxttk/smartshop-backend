@@ -153,10 +153,10 @@ fn ok_fetcher(calls: Arc<Mutex<Vec<String>>>) -> impl Fn(&str) -> FetchResult {
         calls.lock().unwrap().push(plz.to_string());
         vec![(
             "REWE".to_string(),
-            Ok((
-                Market { id: "m1".to_string(), name: format!("REWE Filiale {plz}") },
+            Ok(Some((
+                Market::new("m1", format!("REWE Filiale {plz}")).with_geo(Some(51.02), Some(13.75)),
                 vec![offer("Gouda", Some(1.99)), offer("Butter", Some(2.49))],
-            )),
+            ))),
         )]
     }
 }
@@ -228,6 +228,8 @@ fn markets_upsert_sends_expected_payload() {
     assert_eq!(rows[0]["branch_name"], "REWE Filiale 01219");
     assert_eq!(rows[0]["market_id"], "m1");
     assert_eq!(rows[0]["plz"], "01219");
+    assert_eq!(rows[0]["lat"], 51.02);
+    assert_eq!(rows[0]["lon"], 13.75);
     assert!(rows[0]["updated_at"].is_string());
 
     // Danach läuft der bestehende Push: Offers-Upsert + regions.last_synced
@@ -302,4 +304,33 @@ fn dry_run_only_reads_regions() {
     assert_eq!(reqs.len(), 1, "nur der regions-GET erwartet: {reqs:#?}");
     assert_eq!(reqs[0].method, "GET");
     assert!(reqs[0].target.starts_with("/rest/v1/regions"));
+}
+
+#[test]
+fn chain_without_nearby_branch_is_skipped_not_failed() {
+    let (base_url, log) = spawn_mock(r#"[{"plz":"01219"}]"#);
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let inner = ok_fetcher(calls);
+    // REWE liefert, Lidl hat laut Store-Finder keine Filiale in der Nähe.
+    let fetcher = |plz: &str| -> FetchResult {
+        let mut result = inner(plz);
+        result.push(("Lidl".to_string(), Ok(None)));
+        result
+    };
+    let db_path = temp_db("no-branch");
+    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    let markets: Vec<&Req> = reqs
+        .iter()
+        .filter(|r| r.method == "POST" && r.target.starts_with("/rest/v1/markets"))
+        .collect();
+    assert_eq!(markets.len(), 1);
+    let body: serde_json::Value = serde_json::from_str(&markets[0].body).unwrap();
+    let rows = body.as_array().unwrap();
+    // Nur REWE registriert — Lidl taucht nicht auf
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["chain"], "REWE");
+    // Region gilt trotzdem als erfolgreich: Offers-Push lief
+    assert!(reqs.iter().any(|r| r.method == "POST" && r.target.starts_with("/rest/v1/offers")));
 }

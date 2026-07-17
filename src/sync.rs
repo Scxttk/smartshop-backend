@@ -7,8 +7,9 @@ use crate::push::{self, PushConfig, PushOptions};
 use crate::stores::save_offers;
 
 /// Ergebnis des Scrapens einer Region: pro Kette (Anzeigename wie in
-/// `Store::chain()`) entweder Markt + Angebote oder ein Fehler.
-pub type FetchResult = Vec<(String, Result<(Market, Vec<Offer>)>)>;
+/// `Store::chain()`) Markt + Angebote, `Ok(None)` wenn die Kette laut
+/// Store-Finder keine Filiale im Umkreis der PLZ hat, oder ein Fehler.
+pub type FetchResult = Vec<(String, Result<Option<(Market, Vec<Offer>)>>)>;
 
 /// Scrape-Funktion, die für eine PLZ alle Ketten abruft. In Produktion eine
 /// Closure über `Store::ALL` + `scrape_store`; in Tests ein Stub ohne Netz.
@@ -98,7 +99,12 @@ fn sync_region(opts: &SyncOptions, cfg: &PushConfig, fetcher: &Fetcher, plz: &st
 
     for (chain, result) in fetcher(plz) {
         match result {
-            Ok((market, offers)) => {
+            Ok(None) => {
+                // Kette hat keine Filiale im Umkreis — nicht registrieren,
+                // zählt weder als Erfolg noch als Fehler.
+                println!("[{plz}] {chain}: keine Filiale in der Nähe — übersprungen.");
+            }
+            Ok(Some((market, offers))) => {
                 println!("[{plz}] {chain}: {} Angebote gefunden.", offers.len());
                 match save_offers(&opts.db_path, &market, &offers) {
                     Ok(()) => {
@@ -107,6 +113,8 @@ fn sync_region(opts: &SyncOptions, cfg: &PushConfig, fetcher: &Fetcher, plz: &st
                             "branch_name": market.name,
                             "market_id": market.id,
                             "plz": plz,
+                            "lat": market.lat,
+                            "lon": market.lon,
                             "updated_at": chrono::Utc::now().to_rfc3339(),
                         }));
                         rows.push(Row { chain, market: market.name, result: Ok(offers.len()) });

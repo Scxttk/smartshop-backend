@@ -566,7 +566,15 @@ fn fetch_all(zip: String, cert: String, key: String, dry_run: bool, db: &str) ->
 
     for store in Store::ALL {
         match scrape_store(store, &zip, &cert, &key) {
-            Ok((market, offers)) => {
+            Ok(None) => {
+                println!("Keine {}-Filiale in der Nähe von {zip}.", store.label());
+                rows.push(Row {
+                    store: store.label(),
+                    market: "-".to_string(),
+                    result: Ok(0),
+                });
+            }
+            Ok(Some((market, offers))) => {
                 let count = offers.len();
                 println!("{} Angebote gefunden.", count);
                 if dry_run {
@@ -611,7 +619,10 @@ fn fetch_all(zip: String, cert: String, key: String, dry_run: bool, db: &str) ->
 }
 
 fn fetch(zip: String, store: Store, cert: String, key: String, dry_run: bool, db: &str) -> Result<()> {
-    let (market, offers) = scrape_store(store, &zip, &cert, &key)?;
+    let Some((market, offers)) = scrape_store(store, &zip, &cert, &key)? else {
+        println!("Keine {}-Filiale in der Nähe von {zip}.", store.label());
+        return Ok(());
+    };
     println!("{} Angebote gefunden.", offers.len());
 
     if dry_run {

@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 
 use crate::models::{Market, Offer};
+use crate::scrapers::store_finder;
 use crate::scrapers::util::{self, curl_get};
 
 // ALDI Süd über die öffentliche Produktsuche-API der Website (kein Login):
@@ -28,8 +29,14 @@ const WEEKLY_OFFERS_CATEGORY: &str = "1588161426582123";
 const PAGE_SIZE: usize = 60; // API erlaubt nur [12,16,24,30,32,48,60]
 const MAX_OFFERS: usize = 1000;
 
-pub fn find_market(_zip: &str) -> Result<Market> {
-    Ok(Market { id: "ALDI_SUED_DE".to_string(), name: "ALDI Süd Deutschland".to_string() })
+/// Echte Filiale über den Store-Finder; None ohne Filiale im Umkreis der PLZ.
+/// Angebote bleiben der nationale Katalog (siehe store_finder.rs).
+pub fn find_market(zip: &str) -> Result<Option<Market>> {
+    Ok(store_finder::resolve("ALDI SÜD", store_finder::aldi_sued_branch(zip), national()))
+}
+
+fn national() -> Market {
+    Market::new("ALDI_SUED_DE", "ALDI Süd Deutschland")
 }
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
@@ -187,7 +194,7 @@ mod tests {
     #[test]
     #[ignore = "Live-Test gegen api.aldi-sued.de"]
     fn live_fetch_offers() {
-        let market = find_market("86150").expect("Markt");
+        let market = find_market("86150").expect("Markt").expect("Filiale");
         println!("Markt: {} ({})", market.name, market.id);
 
         let offers = fetch_offers(&market).expect("Angebote");

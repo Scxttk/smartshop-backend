@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 
 use crate::models::{Market, Offer};
-use crate::scrapers::util;
+use crate::scrapers::{store_finder, util};
 
 // Lidl-Angebote über die öffentliche Such-API des Onlineshops (kein Login nötig).
 //
@@ -23,9 +23,15 @@ const SEARCH_URL: &str = "https://www.lidl.de/q/api/search";
 const PAGE_SIZE: usize = 200;
 const MAX_OFFERS: usize = 2000;
 
-pub fn find_market(_zip: &str) -> Result<Market> {
-    // Angebote sind national — die PLZ hat keinen Einfluss.
-    Ok(Market { id: "LIDL_DE".to_string(), name: "Lidl Deutschland".to_string() })
+/// Echte Filiale über den Store-Finder; None, wenn es im Umkreis der PLZ
+/// keine Lidl-Filiale gibt. Die Angebote bleiben der nationale Katalog —
+/// die Filiale liefert nur Präsenz + Metadaten (Name, ID, Koordinaten).
+pub fn find_market(zip: &str) -> Result<Option<Market>> {
+    Ok(store_finder::resolve("Lidl", store_finder::lidl_branch(zip), national()))
+}
+
+fn national() -> Market {
+    Market::new("LIDL_DE", "Lidl Deutschland")
 }
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
@@ -209,7 +215,7 @@ mod tests {
     #[test]
     #[ignore = "Live-Test gegen lidl.de: cargo test lidl -- --ignored --nocapture"]
     fn live_fetch_offers() {
-        let market = find_market("10115").expect("Markt");
+        let market = find_market("10115").expect("Markt").expect("Filiale");
         println!("Markt: {} ({})", market.name, market.id);
 
         let offers = fetch_offers(&market).expect("Angebote");

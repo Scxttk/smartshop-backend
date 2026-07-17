@@ -288,3 +288,97 @@ fn lidl_plus_only_offers_get_price_from_lidl_plus_block() {
         assert!(o.price.is_some(), "Preis fehlt bei {}", o.title);
     }
 }
+
+// ---------------------------------------------------------------- Store-Finder
+// Offline-Fixtures der Filialfinder (Lidl: Bing SDS, ALDI: Uberall) und des
+// Nominatim-Geocoders, gekürzte Live-Antworten vom 2026-07-17 (PLZ 01219).
+
+#[test]
+fn store_finder_virtualearth_hit_yields_lidl_branch_with_geo() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/store_finder/virtualearth_hit.json")).unwrap();
+    let market = scrapers::store_finder::parse_virtualearth(&raw).unwrap().unwrap();
+    assert_eq!(market.id, "LIDL_1988");
+    assert_eq!(market.name, "Lidl Strehlen");
+    assert_eq!(market.lat, Some(51.0338));
+    assert_eq!(market.lon, Some(13.74984));
+}
+
+#[test]
+fn store_finder_virtualearth_empty_means_no_branch() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/store_finder/virtualearth_empty.json")).unwrap();
+    assert!(scrapers::store_finder::parse_virtualearth(&raw).unwrap().is_none());
+}
+
+#[test]
+fn store_finder_virtualearth_malformed_is_error_not_absence() {
+    // Formatänderung darf die Kette nicht stumm abmelden — Fehler löst den
+    // Platzhalter-Fallback aus.
+    let raw = serde_json::json!({"unexpected": true});
+    assert!(scrapers::store_finder::parse_virtualearth(&raw).is_err());
+}
+
+#[test]
+fn store_finder_uberall_hit_yields_branch_with_geo() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/store_finder/uberall_hit.json")).unwrap();
+    let market =
+        scrapers::store_finder::parse_uberall(&raw, "ALDI Nord", "ALDI_NORD").unwrap().unwrap();
+    assert_eq!(market.id, "ALDI_NORD_DE036039");
+    assert_eq!(market.name, "ALDI Nord Dresden");
+    assert_eq!(market.lat, Some(51.019498));
+    assert_eq!(market.lon, Some(13.735563));
+}
+
+#[test]
+fn store_finder_uberall_beyond_cutoff_means_no_branch() {
+    // Nächste Filiale 48 km entfernt -> Kette in der Region nicht vertreten.
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/store_finder/uberall_far.json")).unwrap();
+    assert!(scrapers::store_finder::parse_uberall(&raw, "ALDI Nord", "ALDI_NORD")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn store_finder_uberall_empty_means_no_branch() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/store_finder/uberall_empty.json")).unwrap();
+    assert!(scrapers::store_finder::parse_uberall(&raw, "ALDI SÜD", "ALDI_SUED")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn store_finder_uberall_error_status_is_error() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/store_finder/uberall_error.json")).unwrap();
+    assert!(scrapers::store_finder::parse_uberall(&raw, "ALDI Nord", "ALDI_NORD").is_err());
+}
+
+#[test]
+fn store_finder_nominatim_parses_plz_coordinates() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/store_finder/nominatim_plz.json")).unwrap();
+    let (lat, lon) = scrapers::store_finder::parse_nominatim(&raw).unwrap();
+    assert!((lat - 51.0231864).abs() < 1e-9);
+    assert!((lon - 13.7659125).abs() < 1e-9);
+    assert!(scrapers::store_finder::parse_nominatim(&serde_json::json!([])).is_none());
+}
+
+#[test]
+fn store_finder_resolve_falls_back_to_national_on_error() {
+    use smartshop::models::Market;
+    use smartshop::scrapers::store_finder::resolve;
+
+    let national = || Market::new("LIDL_DE", "Lidl Deutschland");
+    // Treffer gewinnt
+    let hit = Market::new("LIDL_1988", "Lidl Strehlen");
+    assert_eq!(resolve("Lidl", Ok(Some(hit)), national()).unwrap().id, "LIDL_1988");
+    // Sauberes "keine Filiale" -> Kette nicht registrieren
+    assert!(resolve("Lidl", Ok(None), national()).is_none());
+    // Finder-Fehler -> WARN + nationaler Platzhalter (graceful degradation)
+    let fallback = resolve("Lidl", Err(anyhow::anyhow!("Netz weg")), national()).unwrap();
+    assert_eq!(fallback.id, "LIDL_DE");
+}
