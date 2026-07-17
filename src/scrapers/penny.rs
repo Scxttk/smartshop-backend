@@ -235,8 +235,30 @@ fn week_dates(week: &str) -> Result<(String, String)> {
 }
 
 fn json_price(v: &serde_json::Value) -> Option<f64> {
-    v.as_f64()
-        .or_else(|| v.as_str().and_then(|s| s.trim().replace(',', ".").parse::<f64>().ok()))
+    v.as_f64().or_else(|| {
+        // Aktionspreise kommen als String mit Fußnoten-Sternchen, z. B. "0.49*"
+        let s = v.as_str()?;
+        s.trim()
+            .trim_end_matches(['*', '€'])
+            .trim()
+            .replace(',', ".")
+            .parse::<f64>()
+            .ok()
+    })
+}
+
+#[cfg(test)]
+mod price_tests {
+    use super::json_price;
+    use serde_json::json;
+
+    #[test]
+    fn parses_prices_with_footnote_marker() {
+        assert_eq!(json_price(&json!("0.49*")), Some(0.49));
+        assert_eq!(json_price(&json!("1,29 €")), Some(1.29));
+        assert_eq!(json_price(&json!(2.99)), Some(2.99));
+        assert_eq!(json_price(&json!("Aktion")), None);
+    }
 }
 
 // main() ist synchron — eigener Runtime, damit die Aufrufer-API wie bei rewe.rs sync bleibt.
