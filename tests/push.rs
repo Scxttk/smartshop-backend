@@ -1,0 +1,377 @@
+//! Tests für den Supabase-Push: Mapping (Offer -> SupabaseRow) und die
+//! HTTP-Schicht gegen einen handgerollten Mock-Server (kein Live-Netzwerk).
+
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
+use std::sync::{Arc, Mutex};
+
+use smartshop::models::{Market, Offer};
+use smartshop::push::{self, PushConfig, PushOptions, SupabaseRow, chain_for, dedupe_rows, map_offer};
+use smartshop::{db, units};
+
+fn offer(title: &str, price: Option<f64>) -> Offer {
+    Offer {
+        id: Offer::build_id("m1", title, Some("2026-07-13")),
+        market_id: "m1".to_string(),
+        title: title.to_string(),
+        subtitle: None,
+        overline: None,
+        price,
+        regular_price: None,
+        category: Some("Molkerei".to_string()),
+        nutri_score: None,
+        valid_from: Some("2026-07-13".to_string()),
+        valid_until: Some("2026-07-19".to_string()),
+        images: vec![],
+        biozid: false,
+        flyer_page: None,
+    }
+}
+
+// ---------------------------------------------------------------- Mapping
+
+#[test]
+fn map_basic_fields() {
+    let mut o = offer("Gouda", Some(1.99));
+    o.regular_price = Some(2.79);
+    let row = map_offer(&o, "REWE", Some("01219")).unwrap();
+    assert_eq!(row.market, "REWE");
+    assert_eq!(row.product, "Gouda");
+    assert_eq!(row.price, 1.99);
+    assert_eq!(row.regular_price, Some(2.79));
+    assert_eq!(row.unit, "Stück");
+    assert_eq!(row.category.as_deref(), Some("Molkerei"));
+    assert_eq!(row.emoji, None);
+    assert_eq!(row.valid_from.as_deref(), Some("2026-07-13"));
+    assert_eq!(row.valid_until.as_deref(), Some("2026-07-19"));
+    assert_eq!(row.brand, None);
+    assert_eq!(row.ean, None);
+    assert_eq!(row.source, "smartshop-rust");
+    assert_eq!(row.region.as_deref(), Some("01219"));
+}
+
+#[test]
+fn map_skips_offers_without_price() {
+    assert!(map_offer(&offer("Gouda", None), "REWE", None).is_none());
+}
+
+#[test]
+fn map_appends_informative_subtitle() {
+    // Kaufland-Stil: Marke im Titel, Produkt im Untertitel
+    let mut o = offer("K-Classic", Some(0.99));
+    o.subtitle = Some("H-Milch 3,5%".to_string());
+    let row = map_offer(&o, "Kaufland", None).unwrap();
+    assert_eq!(row.product, "K-Classic H-Milch 3,5%");
+}
+
+#[test]
+fn map_drops_pure_quantity_subtitle() {
+    let mut o = offer("Gouda", Some(1.99));
+    o.subtitle = Some("je 250-g-Packg.".to_string());
+    let row = map_offer(&o, "REWE", None).unwrap();
+    assert_eq!(row.product, "Gouda");
+}
+
+#[test]
+fn map_computes_base_price_from_quantity() {
+    let mut o = offer("Wein", Some(3.29));
+    o.subtitle = Some("0.75 l".to_string());
+    let row = map_offer(&o, "REWE", None).unwrap();
+    assert_eq!(row.base_unit.as_deref(), Some("l"));
+    // 3.29 / 0.75 = 4.386..., auf Cent gerundet
+    assert_eq!(row.base_price, Some(4.39));
+}
+
+#[test]
+fn map_prefers_explicit_base_price() {
+    let mut o = offer("Butterkäse", Some(1.79));
+    o.overline = Some("je 650-g-Packg. (1 kg = 2.76)".to_string());
+    let row = map_offer(&o, "Penny", None).unwrap();
+    assert_eq!(row.base_price, Some(2.76));
+    assert_eq!(row.base_unit.as_deref(), Some("kg"));
+}
+
+#[test]
+fn map_serializes_to_expected_json() {
+    let row = map_offer(&offer("Gouda", Some(1.99)), "REWE", Some("01219")).unwrap();
+    let v = serde_json::to_value(&row).unwrap();
+    assert_eq!(v["market"], "REWE");
+    assert_eq!(v["price"], 1.99);
+    assert_eq!(v["emoji"], serde_json::Value::Null);
+    assert_eq!(v["source"], "smartshop-rust");
+    assert_eq!(v["region"], "01219");
+}
+
+#[test]
+fn dedupe_on_conflict_key() {
+    let a = map_offer(&offer("Gouda", Some(1.99)), "REWE", Some("01219")).unwrap();
+    let b = map_offer(&offer("Gouda", Some(2.49)), "REWE", Some("01219")).unwrap();
+    let mut c = a.clone();
+    c.region = Some("10115".to_string());
+    let rows = dedupe_rows(vec![a.clone(), b, c.clone()]);
+    // gleicher Schlüssel (market, product, valid_from, region): erster gewinnt;
+    // andere Region bleibt erhalten
+    assert_eq!(rows, vec![a, c]);
+}
+
+#[test]
+fn chain_detection_from_market() {
+    let m = |id: &str, name: &str| Market { id: id.to_string(), name: name.to_string() };
+    assert_eq!(chain_for(&m("LIDL_DE", "Lidl Deutschland")), Some("Lidl"));
+    assert_eq!(chain_for(&m("ALDI_NORD_DE", "ALDI Nord Deutschland")), Some("ALDI Nord"));
+    assert_eq!(chain_for(&m("ALDI_SUED_DE", "ALDI Süd Deutschland")), Some("ALDI SÜD"));
+    assert_eq!(chain_for(&m("831971", "REWE Christian Koehler oHG")), Some("REWE"));
+    assert_eq!(chain_for(&m("1234", "Kaufland Dresden")), Some("Kaufland"));
+    assert_eq!(chain_for(&m("42", "Feinkost Meier")), None);
+}
+
+#[test]
+fn base_price_units_module_roundtrip() {
+    // Absicherung, dass push dieselbe Ableitung nutzt wie compare/suggest
+    let up = units::derive_unit_price(Some(0.99), &[Some("je 500-g-Packg.")]).unwrap();
+    assert!((up.eur - 1.98).abs() < 1e-9);
+}
+
+// ---------------------------------------------------------- HTTP-Schicht
+
+#[derive(Debug, Clone)]
+struct Req {
+    method: String,
+    target: String, // Pfad + Query
+    headers: Vec<(String, String)>,
+    body: String,
+}
+
+impl Req {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// Minimaler HTTP/1.1-Mock: nimmt Requests an, protokolliert sie und
+/// antwortet immer mit 200 `[]`.
+fn spawn_mock() -> (String, Arc<Mutex<Vec<Req>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let log: Arc<Mutex<Vec<Req>>> = Arc::new(Mutex::new(Vec::new()));
+    let log2 = log.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { break };
+            let mut reader = BufReader::new(stream);
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                let mut parts = line.split_whitespace();
+                let (Some(method), Some(target)) = (parts.next(), parts.next()) else { break };
+                let (method, target) = (method.to_string(), target.to_string());
+                let mut headers = Vec::new();
+                let mut content_length = 0usize;
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    let h = h.trim_end().to_string();
+                    if h.is_empty() {
+                        break;
+                    }
+                    if let Some((k, v)) = h.split_once(':') {
+                        let (k, v) = (k.trim().to_string(), v.trim().to_string());
+                        if k.eq_ignore_ascii_case("content-length") {
+                            content_length = v.parse().unwrap_or(0);
+                        }
+                        headers.push((k, v));
+                    }
+                }
+                let mut body = vec![0u8; content_length];
+                if content_length > 0 {
+                    reader.read_exact(&mut body).unwrap();
+                }
+                log2.lock().unwrap().push(Req {
+                    method,
+                    target,
+                    headers,
+                    body: String::from_utf8_lossy(&body).into_owned(),
+                });
+                let resp = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n[]";
+                if reader.get_mut().write_all(resp.as_bytes()).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    (format!("http://{addr}"), log)
+}
+
+/// Wie spawn_mock, antwortet aber immer mit dem angegebenen Fehlerstatus.
+fn spawn_failing_mock(status: u16, body: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let mut buf = [0u8; 65536];
+            let _ = stream.read(&mut buf);
+            let resp = format!(
+                "HTTP/1.1 {status} ERR\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(resp.as_bytes());
+        }
+    });
+    format!("http://{addr}")
+}
+
+fn temp_db(name: &str) -> String {
+    let dir = std::env::temp_dir().join(format!("smartshop-push-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.join("test.db").to_string_lossy().into_owned()
+}
+
+/// DB mit einem REWE-Markt und `n` bepreisten Angeboten (valid_from 2026-07-13)
+/// plus einem Altwochen-Angebot ohne Preis anlegen.
+fn seed_db(path: &str, n: usize) {
+    let _ = std::fs::remove_file(path);
+    let conn = db::open(path).unwrap();
+    db::upsert_market(&conn, &Market { id: "m1".to_string(), name: "REWE Christian Koehler oHG".to_string() })
+        .unwrap();
+    for i in 0..n {
+        db::upsert_offer(&conn, &offer(&format!("Produkt {i:03}"), Some(1.0 + i as f64 / 100.0)))
+            .unwrap();
+    }
+    db::upsert_offer(&conn, &offer("Ohne Preis", None)).unwrap();
+}
+
+fn run_push(db_path: &str, base_url: &str) -> anyhow::Result<()> {
+    let opts = PushOptions {
+        db_path: db_path.to_string(),
+        chain: None,
+        region: Some("01219".to_string()),
+        dry_run: false,
+    };
+    let cfg = PushConfig { base_url: base_url.to_string(), api_key: "test-key".to_string() };
+    push::run(&opts, Some(&cfg))
+}
+
+#[test]
+fn push_batches_deletes_and_upserts() {
+    let db_path = temp_db("batch");
+    seed_db(&db_path, 150);
+    let (base_url, log) = spawn_mock();
+
+    run_push(&db_path, &base_url).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    // 1x DELETE (stale), 2x POST offers (100 + 50), 1x POST regions
+    assert_eq!(reqs.len(), 4, "Requests: {reqs:#?}");
+
+    let del = &reqs[0];
+    assert_eq!(del.method, "DELETE");
+    assert!(del.target.starts_with("/rest/v1/offers?"), "{}", del.target);
+    assert!(del.target.contains("market=eq.REWE"), "{}", del.target);
+    assert!(del.target.contains("valid_from=lt.2026-07-13"), "{}", del.target);
+    assert_eq!(del.header("apikey"), Some("test-key"));
+    assert_eq!(del.header("authorization"), Some("Bearer test-key"));
+
+    let (b1, b2) = (&reqs[1], &reqs[2]);
+    for b in [b1, b2] {
+        assert_eq!(b.method, "POST");
+        assert!(b.target.starts_with("/rest/v1/offers?"), "{}", b.target);
+        assert!(b.target.contains("on_conflict=market%2Cproduct%2Cvalid_from%2Cregion")
+                || b.target.contains("on_conflict=market,product,valid_from,region"),
+                "{}", b.target);
+        assert_eq!(b.header("prefer"), Some("resolution=merge-duplicates"));
+    }
+    let rows1: Vec<SupabaseRow> = parse_rows(&b1.body);
+    let rows2: Vec<SupabaseRow> = parse_rows(&b2.body);
+    assert_eq!(rows1.len(), 100);
+    assert_eq!(rows2.len(), 50);
+    assert!(rows1.iter().all(|r| r.market == "REWE" && r.region.as_deref() == Some("01219")));
+
+    let reg = &reqs[3];
+    assert_eq!(reg.method, "POST");
+    assert!(reg.target.starts_with("/rest/v1/regions?"), "{}", reg.target);
+    assert!(reg.target.contains("on_conflict=plz"), "{}", reg.target);
+    let v: serde_json::Value = serde_json::from_str(&reg.body).unwrap();
+    assert_eq!(v[0]["plz"], "01219");
+    assert!(v[0]["last_synced"].as_str().unwrap().starts_with("20"));
+}
+
+fn parse_rows(body: &str) -> Vec<SupabaseRow> {
+    let v: serde_json::Value = serde_json::from_str(body).unwrap();
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|r| SupabaseRow {
+            market: r["market"].as_str().unwrap().to_string(),
+            product: r["product"].as_str().unwrap().to_string(),
+            price: r["price"].as_f64().unwrap(),
+            regular_price: r["regular_price"].as_f64(),
+            unit: r["unit"].as_str().unwrap().to_string(),
+            category: r["category"].as_str().map(String::from),
+            emoji: None,
+            valid_from: r["valid_from"].as_str().map(String::from),
+            valid_until: r["valid_until"].as_str().map(String::from),
+            base_price: r["base_price"].as_f64(),
+            base_unit: r["base_unit"].as_str().map(String::from),
+            brand: None,
+            ean: None,
+            source: r["source"].as_str().unwrap().to_string(),
+            region: r["region"].as_str().map(String::from),
+        })
+        .collect()
+}
+
+#[test]
+fn push_fails_with_german_error_on_http_error() {
+    let db_path = temp_db("err");
+    seed_db(&db_path, 2);
+    let base_url = spawn_failing_mock(401, "{\"message\":\"Invalid API key\"}");
+
+    let err = run_push(&db_path, &base_url).unwrap_err().to_string();
+    assert!(err.contains("fehlgeschlagen"), "{err}");
+    assert!(err.contains("401"), "{err}");
+    assert!(err.contains("Invalid API key"), "{err}");
+}
+
+#[test]
+fn push_requires_region_unless_dry_run() {
+    let db_path = temp_db("region");
+    seed_db(&db_path, 1);
+    let opts = PushOptions { db_path, chain: None, region: None, dry_run: false };
+    let err = push::run(&opts, None).unwrap_err().to_string();
+    assert!(err.contains("--region"), "{err}");
+}
+
+#[test]
+fn dry_run_makes_no_requests() {
+    let db_path = temp_db("dry");
+    seed_db(&db_path, 3);
+    let (_base_url, log) = spawn_mock();
+    let opts = PushOptions { db_path, chain: None, region: None, dry_run: true };
+    // cfg: None — Dry-Run braucht weder Env noch Netzwerk
+    push::run(&opts, None).unwrap();
+    assert!(log.lock().unwrap().is_empty());
+}
+
+#[test]
+fn chain_filter_limits_push() {
+    let db_path = temp_db("filter");
+    seed_db(&db_path, 2);
+    let (base_url, log) = spawn_mock();
+    let opts = PushOptions {
+        db_path,
+        chain: Some("Lidl".to_string()), // DB enthält nur REWE
+        region: Some("01219".to_string()),
+        dry_run: false,
+    };
+    let cfg = PushConfig { base_url, api_key: "k".to_string() };
+    push::run(&opts, Some(&cfg)).unwrap();
+    assert!(log.lock().unwrap().is_empty());
+}
