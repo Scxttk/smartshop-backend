@@ -171,6 +171,17 @@ Keyword-Tabelle — ohne Treffer das Standard-Emoji der Kategorie, nie null.
 Die App hardcodet diese Liste; Änderungen nur zusammen mit einem App-Update
 (Regressionstest in `tests/enrich.rs`).
 
+Zusätzlich trägt jede Zeile in `image_url` ein Produktbild: Die Scraper liefern
+die Händler-Bild-URLs mit, der Push spiegelt sie in den öffentlichen
+Supabase-Storage-Bucket `offer-images` (`src/storage.rs`) und schreibt die
+stabile Bucket-URL in die Zeile — Händler-CDNs rotieren ihre Pfade wöchentlich
+und blocken teils Hotlinks. Die Spiegelung ist idempotent (Objektpfad =
+sha256 der Quell-URL, Upload mit `x-upsert`); bereits hochgeladene Bilder merkt
+sich die lokale Tabelle `uploaded_images`, sodass Nachtläufe nur neue Bilder
+anfassen. Fehler einzelner Bilder brechen den Push nicht ab — dann bleibt die
+Händler-URL stehen, das Emoji ist der letzte Fallback in der App.
+`--no-mirror-images` schaltet die Spiegelung ab.
+
 | Kategorie | Default-Emoji | | Kategorie | Default-Emoji |
 |---|---|---|---|---|
 | Obst & Gemüse | 🥬 | | Alkohol | 🍺 |
@@ -266,15 +277,18 @@ Netz betreiben. Schreibend ist einzig die Watchlist (anlegen/entfernen).
 ## Datenbank & Schema
 
 SQLite im WAL-Modus. Tabellen: `markets`, `offers`, `price_history`, `watches`,
-`shopping_list`. Die Schema-Version steht in `PRAGMA user_version`; `db::open()`
+`shopping_list`, `uploaded_images`. Die Schema-Version steht in `PRAGMA user_version`; `db::open()`
 migriert beim Öffnen automatisch auf die aktuelle Version. Schema-Änderungen
 erhöhen `SCHEMA_VERSION` und ergänzen einen Migrationsschritt in `migrate()`
 (`src/db.rs`) — bestehende Datenbanken werden dabei in-place aktualisiert.
 
-Das Supabase-Schema (Tabellen `offers`, `regions`, `markets`) liegt kanonisch
-unter [`supabase/`](supabase/) — `schema.sql` + Migrationen; neue Projekte:
-`setup_full.sql`, dann `migration_regions.sql`, dann
-`migration_v3_multi_region.sql` im SQL-Editor ausführen.
+Das Supabase-Schema (Tabellen `offers`, `regions`, `markets` plus
+Storage-Bucket `offer-images`) liegt kanonisch unter
+[`supabase/`](supabase/) — `schema.sql` + Migrationen; neue Projekte:
+`setup_full.sql`, dann `migration_regions.sql`,
+`migration_v3_multi_region.sql`, `migration_v4_region_trigger.sql`,
+`migration_v5_image_url.sql` und `migration_v6_storage_bucket.sql` im
+SQL-Editor ausführen.
 
 ## Preis-Historie
 
