@@ -1,0 +1,250 @@
+use anyhow::{Context, Result, bail};
+use scraper::{ElementRef, Html, Selector};
+use std::collections::HashSet;
+
+use crate::models::{Market, Offer};
+use crate::scrapers::util::{curl_get, curl_redirect_url};
+
+// EDEKA über edeka.de (regionale Angebote, Markt über PLZ wie bei Rewe).
+//
+// Marktsuche (öffentliches JSON):
+//   GET https://www.edeka.de/api/marketsearch/markets?searchstring=<PLZ>
+// Die Antwort trägt noch die alte Markt-URL (/eh/<region>/<slug>/index.jsp);
+// deren 308-Redirect zeigt auf die neue Seite /maerkte/<id>/ — diese ID
+// braucht die Angebotsseite. (Die alte /api/offers-Schnittstelle ist tot
+// und antwortet nur noch mit einem Scherz-JSON.)
+//
+// Angebote sind server-seitig gerendert:
+//   GET https://www.edeka.de/maerkte/<id>/angebote/
+// Ein <article> pro Angebot; Titel im Anker a[href^="#angebot-"] (mit
+// sr-only-Präfix "Angebot:", Überschrift h2/h3/h4 je nach Kachelgröße),
+// Preis maschinenlesbar in einem sr-only-Div ("Festpreis von 3.99 €" bzw.
+// "App-Preis von 0.88 €"), Beschreibung in p.line-clamp-2, Gültigkeit als
+// Seitentext "Gültig ab 13.07.2026" / "gültig bis Samstag, den 18.07.2026".
+//
+// Akamai-Bot-Schutz wie bei Netto/ALDI Süd -> util::curl_get statt reqwest.
+
+const BASE: &str = "https://www.edeka.de";
+
+pub fn find_market(zip: &str) -> Result<Market> {
+    let url = format!("{BASE}/api/marketsearch/markets?searchstring={zip}");
+    let body = curl_get(
+        &url,
+        &[
+            ("Accept", "application/json, text/plain, */*"),
+            ("Referer", "https://www.edeka.de/marktsuche.jsp"),
+            ("Sec-Fetch-Site", "same-origin"),
+            ("Sec-Fetch-Mode", "cors"),
+            ("Sec-Fetch-Dest", "empty"),
+        ],
+    )?;
+
+    let raw: serde_json::Value =
+        serde_json::from_str(&body).context("EDEKA-Marktsuche JSON parse fehlgeschlagen")?;
+    let market = raw
+        .get("markets")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.first())
+        .with_context(|| format!("Kein EDEKA-Markt für PLZ {zip} gefunden"))?;
+
+    let name = market
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("EDEKA")
+        .to_string();
+    let legacy_url = market
+        .get("url")
+        .and_then(|v| v.as_str())
+        .context("Markt-URL fehlt in der Marktsuche-Antwort")?;
+
+    // Alte URL -> 308-Redirect -> https://www.edeka.de/maerkte/<id>/
+    let target = curl_redirect_url(
+        legacy_url,
+        &[
+            ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+            ("Sec-Fetch-Site", "none"),
+            ("Sec-Fetch-Mode", "navigate"),
+            ("Sec-Fetch-Dest", "document"),
+            ("Sec-Fetch-User", "?1"),
+            ("Upgrade-Insecure-Requests", "1"),
+        ],
+    )?;
+    let id = target
+        .split("/maerkte/")
+        .nth(1)
+        .map(|rest| rest.trim_matches('/'))
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+        .with_context(|| format!("Unerwartetes Redirect-Ziel für EDEKA-Markt: {target}"))?;
+
+    Ok(Market { id: id.to_string(), name })
+}
+
+pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
+    let url = format!("{BASE}/maerkte/{}/angebote/", market.id);
+    let html = curl_get(
+        &url,
+        &[
+            ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+            ("Sec-Fetch-Site", "none"),
+            ("Sec-Fetch-Mode", "navigate"),
+            ("Sec-Fetch-Dest", "document"),
+            ("Sec-Fetch-User", "?1"),
+            ("Upgrade-Insecure-Requests", "1"),
+        ],
+    )?;
+
+    let offers = parse_offers(&html, &market.id)?;
+    if offers.is_empty() {
+        bail!("Keine EDEKA-Angebote gefunden — Seitenstruktur hat sich möglicherweise geändert");
+    }
+    Ok(offers)
+}
+
+fn parse_offers(html: &str, market_id: &str) -> Result<Vec<Offer>> {
+    let doc = Html::parse_document(html);
+    let sel_article = sel("article");
+    // Highlight-Kacheln nutzen h2, normale Kacheln h4 (vereinzelt h3);
+    // der Anker "#angebot-<uuid>" unterscheidet Angebote von anderen <article>s.
+    let sel_title = sel(r##"a[href^="#angebot-"]"##);
+    let sel_desc = sel("p.line-clamp-2");
+    let sel_sronly = sel("div.sr-only");
+    let sel_img = sel("img");
+
+    // Seitenweite Gültigkeit: "Gültig ab 13.07.2026" ... "gültig bis ..., den 18.07.2026"
+    let page_text: String = doc.root_element().text().collect();
+    let valid_from = find_date_after(&page_text, "Gültig ab ");
+    let valid_until = find_date_after(&page_text, "gültig bis ");
+
+    let mut offers = Vec::new();
+    let mut seen = HashSet::new();
+
+    for article in doc.select(&sel_article) {
+        // "Angebot: Kulturheidelbeeren" -> "Kulturheidelbeeren"
+        let Some(title) = text_of(article, &sel_title)
+            .map(|t| t.trim_start_matches("Angebot:").trim().to_string())
+            .filter(|t| !t.is_empty())
+        else {
+            continue;
+        };
+
+        // "Festpreis von 3.99 €" / "App-Preis von 0.88 €"
+        let price = article
+            .select(&sel_sronly)
+            .map(|e| e.text().collect::<String>())
+            .find(|t| t.contains("reis von"))
+            .and_then(|t| parse_price(&t));
+
+        let subtitle = text_of(article, &sel_desc);
+
+        let images = article
+            .select(&sel_img)
+            .next()
+            .and_then(|img| img.value().attr("src"))
+            .map(|s| vec![s.to_string()])
+            .unwrap_or_default();
+
+        let id = Offer::build_id(market_id, &title, valid_from.as_deref());
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+
+        offers.push(Offer {
+            id,
+            market_id: market_id.to_string(),
+            title,
+            subtitle,
+            overline: None,
+            price,
+            regular_price: None,
+            category: None,
+            nutri_score: None,
+            valid_from: valid_from.clone(),
+            valid_until: valid_until.clone(),
+            images,
+            biozid: false,
+            flyer_page: None,
+        });
+    }
+
+    Ok(offers)
+}
+
+fn sel(css: &str) -> Selector {
+    Selector::parse(css).expect("statischer CSS-Selektor")
+}
+
+fn text_of(el: ElementRef, selector: &Selector) -> Option<String> {
+    let text: String = el.select(selector).next()?.text().collect();
+    let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.is_empty() { None } else { Some(text) }
+}
+
+// "Festpreis von 3.99 €" -> 3.99 (erste als Zahl parsbare Token)
+fn parse_price(s: &str) -> Option<f64> {
+    s.split_whitespace()
+        .find_map(|tok| tok.replace(',', ".").parse::<f64>().ok())
+}
+
+// Erstes "dd.mm.yyyy" nach dem Marker -> "yyyy-mm-dd"
+fn find_date_after(text: &str, marker: &str) -> Option<String> {
+    let idx = text.find(marker)? + marker.len();
+    let window = &text[idx..text.len().min(idx + 60)];
+    let mut nums = window
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|p| !p.is_empty());
+    loop {
+        let d = nums.next()?;
+        let m = nums.next()?;
+        let y = nums.next()?;
+        if d.len() <= 2 && m.len() <= 2 && y.len() == 4 {
+            let (day, month, year): (u32, u32, u32) =
+                (d.parse().ok()?, m.parse().ok()?, y.parse().ok()?);
+            if (1..=31).contains(&day) && (1..=12).contains(&month) {
+                return Some(format!("{year}-{month:02}-{day:02}"));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn price_parsing() {
+        assert_eq!(parse_price("Festpreis von 3.99 €"), Some(3.99));
+        assert_eq!(parse_price("App-Preis von 0.88 €"), Some(0.88));
+        assert_eq!(parse_price("kein Preis"), None);
+    }
+
+    #[test]
+    fn date_after_marker() {
+        assert_eq!(
+            find_date_after("... Gültig ab 13.07.2026 ...", "Gültig ab "),
+            Some("2026-07-13".to_string())
+        );
+        assert_eq!(
+            find_date_after("gültig bis Samstag, den 18.07.2026, KW 29", "gültig bis "),
+            Some("2026-07-18".to_string())
+        );
+        assert_eq!(find_date_after("nichts", "Gültig ab "), None);
+    }
+
+    /// Live-Test gegen edeka.de: cargo test edeka -- --ignored --nocapture
+    #[test]
+    #[ignore = "Live-Test gegen edeka.de"]
+    fn live_fetch_offers() {
+        let market = find_market("48683").expect("Markt");
+        println!("Markt: {} ({})", market.name, market.id);
+
+        let offers = fetch_offers(&market).expect("Angebote");
+        println!("{} Angebote", offers.len());
+        for o in offers.iter().take(5) {
+            println!(
+                "- {} | {:?} | {:?} € | {:?} bis {:?}",
+                o.title, o.subtitle, o.price, o.valid_from, o.valid_until
+            );
+        }
+        assert!(offers.len() >= 80, "Erwartet >= 80 Angebote, war {}", offers.len());
+    }
+}
