@@ -87,6 +87,22 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 mkdir -p "$(dirname "$DB")"
 
+# Binary neu bauen, damit der Lauf nie ein veraltetes Installat benutzt
+# (~/.cargo/bin/smartshop hinkt sonst nach jeder Code-Änderung hinterher).
+# Schlägt der Build fehl, brechen wir ab statt mit altem Binary weiterzulaufen.
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -f "$REPO_DIR/Cargo.toml" ]; then
+    CARGO="${CARGO:-$HOME/.cargo/bin/cargo}"
+    command -v "$CARGO" >/dev/null 2>&1 || CARGO="cargo"
+    command -v "$CARGO" >/dev/null 2>&1 \
+        || fail "cargo nicht gefunden — Rebuild vor dem Sync nicht möglich."
+    log "Baue smartshop neu (cargo install --path $REPO_DIR --locked)..."
+    "$CARGO" install --path "$REPO_DIR" --locked >>"$LOG_FILE" 2>&1 \
+        || fail "cargo install fehlgeschlagen — Abbruch, um nicht mit altem Binary zu laufen (Details: $LOG_FILE)."
+else
+    log "WARNUNG: Repo nicht gefunden ($REPO_DIR/Cargo.toml fehlt) — benutze vorhandenes Binary."
+fi
+
 # Binary finden: SMARTSHOP_BIN aus der Env-Datei, sonst PATH, sonst ~/.cargo/bin
 # (launchd startet mit minimalem PATH, cargo install landet dort).
 if [ -z "${SMARTSHOP_BIN:-}" ]; then
