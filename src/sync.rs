@@ -117,11 +117,22 @@ fn upsert_markets(cfg: &PushConfig, rows: &[serde_json::Value]) -> Result<()> {
 ///    Der Check kostet ~2 Requests pro Kette und vermeidet dieses Leck.
 ///    Finder-Fehler überspringen die Kette nur (kein Kopieren, kein Abbruch) —
 ///    der reguläre Scrape direkt danach hat seinen eigenen Fallback.
-/// 2. Neueste noch gültige Woche der Kette in irgendeiner Region suchen und
-///    deren Zeilen mit region=<PLZ> upserten (gleicher Konfliktschlüssel wie
-///    der Push — der spätere Scrape derselben Woche merged einfach darüber).
+/// 2. ALLE noch gültigen Wochen der Kette kopieren, nicht nur die neueste:
+///    Lidl führt bis zu 6 überlappende Wochen parallel (die mit max.
+///    valid_from ist die Non-Food-Vorschau des Onlineshops — nur sie zu
+///    kopieren zeigte in der App 30 Onlineshop-Artikel statt ~255 Angebote).
+///    Quellregion ist die mit den meisten aktuell gültigen Zeilen der Kette —
+///    robuster als "zuletzt gesynct", denn eine gerade halb gescheiterte
+///    Region wäre zwar die neueste, hätte aber Lücken. Kopiert wird per
+///    Upsert mit dem Push-Konfliktschlüssel; der Scrape merged später drüber.
 /// 3. Die gefundene Filiale nach `public.markets` melden, damit die App die
 ///    Kette sofort anzeigt.
+///
+/// Der Seed ist reine Sofort-Anzeige, KEIN Ersatz für den Scrape: die Kette
+/// wird im selben Lauf trotzdem normal gescrapet, und deren Push überschreibt
+/// idempotent (alte Wochen löschen + vollen Katalog upserten). Das ist
+/// robuster, als den Scrape für geseedete Ketten zu überspringen — eine
+/// unvollständige oder veraltete Kopie heilt sich so im selben Lauf selbst.
 ///
 /// Liefert die Zahl kopierter Angebote; Fehler einzelner Ketten warnen nur.
 pub fn seed_national_chains(cfg: &PushConfig, finder: &BranchFinder, plz: &str) -> usize {
@@ -156,40 +167,44 @@ fn seed_chain(cfg: &PushConfig, finder: &BranchFinder, chain: &str, plz: &str) -
         }
     };
 
-    // Neueste noch gültige Woche der Kette in irgendeiner Region finden.
+    // Beste Quellregion finden: die mit den meisten aktuell gültigen Zeilen
+    // der Kette (nur region-Spalte laden, client-seitig zählen — Aggregate
+    // sind in PostgREST standardmäßig aus). Die Ziel-PLZ selbst zählt nicht.
     let offers_url = format!("{}/rest/v1/offers", cfg.base_url);
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let today = chrono::Utc::now()
+        .with_timezone(&chrono_tz::Europe::Berlin)
+        .format("%Y-%m-%d")
+        .to_string();
     let resp = auth(cfg, client.get(&offers_url))
         .query(&[
-            ("select", "valid_from,region"),
+            ("select", "region"),
             ("market", &format!("eq.{chain}")),
             ("valid_until", &format!("gte.{today}")),
-            ("order", "valid_from.desc"),
-            ("limit", "1"),
         ])
         .send()
         .with_context(|| format!("Supabase nicht erreichbar ({})", cfg.base_url))?;
     if !resp.status().is_success() {
         let status = resp.status();
-        bail!("Wochen-Suche fehlgeschlagen (HTTP {status})");
+        bail!("Quellregion-Suche fehlgeschlagen (HTTP {status})");
     }
     let probe: Vec<serde_json::Value> =
-        resp.json().context("Wochen-Suche: Antwort ist kein gültiges JSON")?;
-    let Some(hit) = probe.first() else {
+        resp.json().context("Quellregion-Suche: Antwort ist kein gültiges JSON")?;
+    let mut counts: std::collections::HashMap<Option<String>, usize> =
+        std::collections::HashMap::new();
+    for hit in &probe {
+        let region = hit.get("region").and_then(|v| v.as_str()).map(String::from);
+        if region.as_deref() == Some(plz) {
+            continue;
+        }
+        *counts.entry(region).or_default() += 1;
+    }
+    let Some((source_region, _)) = counts.into_iter().max_by_key(|(_, n)| *n) else {
         println!("[{plz}] {chain}: keine gültigen Angebote in anderen Regionen — nichts zu kopieren.");
         return Ok(0);
     };
-    let valid_from = hit
-        .get("valid_from")
-        .and_then(|v| v.as_str())
-        .context("Wochen-Suche: valid_from fehlt")?
-        .to_string();
-    let source_region = hit.get("region").and_then(|v| v.as_str()).map(String::from);
-    if source_region.as_deref() == Some(plz) {
-        return Ok(0);
-    }
 
-    // Alle Zeilen der Quell-Woche laden und mit region=<PLZ> upserten.
+    // Alle aktuell UND künftig gültigen Zeilen der Quellregion laden und mit
+    // region=<PLZ> upserten — abgelaufene Wochen bleiben weg.
     let region_filter = match &source_region {
         Some(r) => ("region", format!("eq.{r}")),
         None => ("region", "is.null".to_string()),
@@ -197,7 +212,7 @@ fn seed_chain(cfg: &PushConfig, finder: &BranchFinder, chain: &str, plz: &str) -
     let resp = auth(cfg, client.get(&offers_url))
         .query(&[
             ("market", &format!("eq.{chain}")),
-            ("valid_from", &format!("eq.{valid_from}")),
+            ("valid_until", &format!("gte.{today}")),
             (region_filter.0, &region_filter.1),
         ])
         .send()

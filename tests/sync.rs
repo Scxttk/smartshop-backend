@@ -492,14 +492,27 @@ const LIDL_SOURCE_ROW: &str = r#"[{
     "valid_from": "2026-07-13", "valid_until": "2026-07-19",
     "base_price": null, "base_unit": null, "brand": null, "ean": null,
     "source": "smartshop-rust", "region": "01219"
+},{
+    "market": "Lidl", "product": "Akku-Schrauber", "price": 29.99,
+    "regular_price": null, "unit": "Stück", "category": "Haushalt",
+    "emoji": "🔧", "image_url": null,
+    "valid_from": "2026-07-30", "valid_until": "2026-08-05",
+    "base_price": null, "base_unit": null, "brand": null, "ean": null,
+    "source": "smartshop-rust", "region": "01219"
 }]"#;
 
 #[test]
 fn only_mode_copies_national_chain_offers_before_scraping() {
     static ROUTES: [(&str, &str); 2] = [
-        // Wochen-Suche (limit=1) vor der Zeilen-Suche matchen.
-        ("limit=1", r#"[{"valid_from":"2026-07-13","region":"01219"}]"#),
-        ("valid_from=eq.2026-07-13", LIDL_SOURCE_ROW),
+        // Quellregion-Suche (select=region): 01219 hat die meisten gültigen
+        // Zeilen; 08451 ist dünn, die Ziel-PLZ 10115 darf nicht zählen.
+        (
+            "select=region",
+            r#"[{"region":"01219"},{"region":"01219"},{"region":"01219"},{"region":"08451"},{"region":"10115"},{"region":"10115"},{"region":"10115"},{"region":"10115"}]"#,
+        ),
+        // Zeilen-Suche in der gewählten Quellregion: zwei überlappende Wochen
+        // (Lebensmittel 13.07 + Non-Food-Vorschau 30.07) — beide gültig.
+        ("region=eq.01219", LIDL_SOURCE_ROW),
     ];
     let (base_url, log) = spawn_routed_mock(&ROUTES);
     let fetcher = ok_fetcher(Arc::new(Mutex::new(Vec::new())));
@@ -534,9 +547,13 @@ fn only_mode_copies_national_chain_offers_before_scraping() {
         })
         .expect("Vorab-Kopie-Upsert fehlt");
     let rows: serde_json::Value = serde_json::from_str(&copy.body).unwrap();
-    assert_eq!(rows[0]["region"], "10115");
-    assert_eq!(rows[0]["market"], "Lidl");
-    assert_eq!(rows[0]["price"], 1.99);
+    let rows = rows.as_array().unwrap();
+    // ALLE gültigen Wochen kommen mit (Lebensmittel + Vorschau), nicht nur
+    // die mit max. valid_from.
+    assert_eq!(rows.len(), 2, "{rows:#?}");
+    let weeks: Vec<&str> = rows.iter().map(|r| r["valid_from"].as_str().unwrap()).collect();
+    assert_eq!(weeks, vec!["2026-07-13", "2026-07-30"]);
+    assert!(rows.iter().all(|r| r["region"] == "10115" && r["market"] == "Lidl"));
     assert!(
         copy.target.contains("on_conflict=market%2Cproduct%2Cvalid_from%2Cregion")
             || copy.target.contains("on_conflict=market,product,valid_from,region"),
@@ -568,6 +585,23 @@ fn only_mode_copies_national_chain_offers_before_scraping() {
         .collect();
     assert_eq!(offer_gets.len(), 2, "{offer_gets:#?}");
     assert!(offer_gets.iter().all(|r| r.target.contains("market=eq.Lidl")));
+    // Beide GETs filtern serverseitig auf noch gültige Zeilen — abgelaufene
+    // Wochen können so gar nicht erst in die Kopie geraten.
+    assert!(
+        offer_gets.iter().all(|r| r.target.contains("valid_until=gte.")),
+        "{offer_gets:#?}"
+    );
+    // Die Zeilen-Suche zieht die Quellregion mit den meisten gültigen Zeilen
+    // (01219), nicht die dünne (08451) und nicht die Ziel-PLZ selbst (10115).
+    assert!(
+        offer_gets.iter().any(|r| r.target.contains("region=eq.01219")),
+        "{offer_gets:#?}"
+    );
+    assert!(
+        !offer_gets.iter().any(|r| r.target.contains("region=eq.10115")
+            || r.target.contains("region=eq.08451")),
+        "{offer_gets:#?}"
+    );
 }
 
 #[test]
