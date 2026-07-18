@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::models::{Market, Offer};
 use crate::scrapers::{store_finder, util};
@@ -89,20 +89,41 @@ pub fn fetch_offers(market: &Market, zip: &str, max_pages: usize) -> Result<Vec<
             bail!("[Lidl-Prospekt] Keine Angebotsseiten nach Vorfilter in Slug {slug}");
         }
 
-        // 4./5./6. Bild laden -> Vision -> Offers mit injizierten Daten.
+        // 4./5./6. Bild laden -> (Cache ODER Vision) -> Offers mit Daten.
+        // Der Cache (Schlüssel = SHA-256 der Bild-Bytes) spart die teuren,
+        // rate-limitierten Vision-Calls: dieselbe Variante wird pro Woche nur
+        // einmal extrahiert, nicht jede Nacht und nicht je PLZ derselben Region.
+        let mut cache = VisionCache::load();
+        let today = today_berlin();
+        let mut vision_calls = 0usize;
+
         let mut offers = Vec::new();
         for (idx, page) in &pages {
             let bytes = download_image(&client, page.best_image()).await?;
-            let raws = match vision_extract(&client, &token, &bytes).await {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("[Lidl-Prospekt] Seite {idx} Vision fehlgeschlagen: {e:#}");
-                    continue;
+            let key = image_key(&bytes);
+            let raws = if let Some(hit) = cache.get(&key, today) {
+                eprintln!("[Lidl-Prospekt] Seite {idx}: {} Angebote aus Cache", hit.len());
+                hit
+            } else {
+                // Nur vor einem echten Vision-Call throtteln (nicht bei Cache-Hits).
+                if vision_calls > 0 {
+                    std::thread::sleep(std::time::Duration::from_secs(CALL_PAUSE_SECS));
+                }
+                vision_calls += 1;
+                match vision_extract(&client, &token, &bytes).await {
+                    Ok(r) => {
+                        cache.put(key, r.clone(), flyer.offer_end_date.as_deref());
+                        r
+                    }
+                    Err(e) => {
+                        eprintln!("[Lidl-Prospekt] Seite {idx} Vision fehlgeschlagen: {e:#}");
+                        continue;
+                    }
                 }
             };
-            for raw in raws {
+            for raw in &raws {
                 if let Some(o) = build_offer(
-                    &raw,
+                    raw,
                     &market.id,
                     flyer.offer_start_date.as_deref(),
                     flyer.offer_end_date.as_deref(),
@@ -111,8 +132,14 @@ pub fn fetch_offers(market: &Market, zip: &str, max_pages: usize) -> Result<Vec<
                     offers.push(o);
                 }
             }
-            std::thread::sleep(std::time::Duration::from_secs(CALL_PAUSE_SECS));
         }
+        if vision_calls > 0 {
+            cache.save();
+        }
+        eprintln!(
+            "[Lidl-Prospekt] {vision_calls} Vision-Call(s), {} Seite(n) aus Cache",
+            pages.len() - vision_calls
+        );
 
         Ok(dedup(offers))
     })
@@ -417,7 +444,7 @@ z.B. 1.99), \"unit\" (Menge/Einheit als String, optional, z.B. \"500 g\" oder \"
 Keine Datumsangaben. Keine Non-Food-Artikel, keine reinen Werbetexte ohne Preis. \
 Wenn kein Preis erkennbar ist, lass das Angebot weg. Nur das JSON-Array, kein weiterer Text.";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RawOffer {
     pub name: String,
     // Vision-Modelle liefern den Preis mal als Zahl (1.99), mal als String
@@ -539,6 +566,99 @@ fn strip_fences(s: &str) -> String {
     let t = t.strip_prefix("```json").or_else(|| t.strip_prefix("```")).unwrap_or(t);
     let t = t.strip_suffix("```").unwrap_or(t);
     t.trim().to_string()
+}
+
+// --------------------------------------------------------------- Vision-Cache
+//
+// Persistenter Cache extrahierter Seiten, Schlüssel = SHA-256 der Bild-Bytes.
+// Motiv: Lebensmittel-Seiten sind über die Tage einer Prospektwoche und über
+// alle PLZ derselben Absatzregion identisch (dieselbe Variante -> dieselben
+// Bild-Bytes). Ohne Cache extrahiert der nächtliche Multi-Region-Sync dieselbe
+// Variante jede Nacht neu und sprengt das Free-Tier-Limit (150 Vision-Req/Tag).
+// Mit Cache wird jede Variante pro Woche nur einmal extrahiert.
+//
+// Der Bytes-Hash (statt URL) ist robust gegen die täglich neu signierten
+// imgproxy-URLs — gleiche Bild-Bytes ergeben denselben Schlüssel. Über
+// verschiedene Regionsvarianten dedupliziert er bewusst NICHT (deren Bilder
+// sind neu gerendert, andere Bytes), was korrekt ist: regionale Angebote sollen
+// getrennt bleiben.
+
+const CACHE_ENV: &str = "LIDL_PROSPEKT_CACHE";
+
+fn cache_path() -> std::path::PathBuf {
+    std::env::var_os(CACHE_ENV)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("smartshop_lidl_flyer_cache.json"))
+}
+
+/// SHA-256 der Bild-Bytes als Hex-String (Cache-Schlüssel).
+pub fn image_key(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct CacheEntry {
+    /// Gültig bis einschließlich dieses Tages (YYYY-MM-DD, Flyer-Enddatum).
+    expires: String,
+    offers: Vec<RawOffer>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct VisionCache {
+    #[serde(default)]
+    entries: std::collections::HashMap<String, CacheEntry>,
+}
+
+impl VisionCache {
+    /// Cache von der Platte laden und dabei abgelaufene Einträge verwerfen
+    /// (begrenzt das Dateiwachstum). Fehlt/kaputt -> leer.
+    fn load() -> Self {
+        let mut cache: VisionCache = std::fs::read(cache_path())
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        let today = today_berlin();
+        cache.entries.retain(|_, e| e.expires.as_str() >= today);
+        cache
+    }
+
+    /// Nicht abgelaufener Treffer für den Bild-Hash.
+    fn get(&self, key: &str, today: &str) -> Option<Vec<RawOffer>> {
+        self.entries
+            .get(key)
+            .filter(|e| e.expires.as_str() >= today)
+            .map(|e| e.offers.clone())
+    }
+
+    fn put(&mut self, key: String, offers: Vec<RawOffer>, valid_until: Option<&str>) {
+        let expires = valid_until.map(String::from).unwrap_or_else(default_expiry);
+        self.entries.insert(key, CacheEntry { expires, offers });
+    }
+
+    /// Atomar (Temp-Datei + rename) speichern und dabei mit dem aktuellen
+    /// Dateiinhalt mergen, damit parallele Schreiber (nightly + on-demand) sich
+    /// nicht gegenseitig überschreiben. Der Cache ist beratend — Fehler werden
+    /// geschluckt, ein verlorener Eintrag führt nur zu erneuter Extraktion.
+    fn save(&self) {
+        let path = cache_path();
+        let mut merged = VisionCache::load();
+        for (k, v) in &self.entries {
+            merged.entries.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        let Ok(json) = serde_json::to_vec(&merged) else { return };
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, &json).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+}
+
+/// Ohne Flyer-Enddatum: eine Woche ab heute (Europe/Berlin) als Ablauf.
+fn default_expiry() -> String {
+    (chrono::Utc::now().with_timezone(&chrono_tz::Europe::Berlin) + chrono::Duration::days(7))
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 // --------------------------------------------------------------- Offer-Bau
@@ -663,6 +783,51 @@ mod tests {
             .expect("Butter-Angebot");
         assert_eq!(offer.price, Some(1.49));
         assert_eq!(offer.subtitle.as_deref(), Some("250 g"));
+    }
+
+    #[test]
+    fn image_key_is_stable_and_content_addressed() {
+        // Gleiche Bytes -> gleicher Schlüssel; ein Byte anders -> anderer.
+        assert_eq!(image_key(b"seite-bytes"), image_key(b"seite-bytes"));
+        assert_ne!(image_key(b"seite-bytes"), image_key(b"seite-bytez"));
+        assert_eq!(image_key(b"abc").len(), 64, "SHA-256 als Hex");
+    }
+
+    #[test]
+    fn vision_cache_round_trips_and_expires() {
+        // Eigene Cache-Datei pro Test, damit nichts Globales angefasst wird.
+        let path = std::env::temp_dir().join(format!("smartshop_cache_test_{}.json", std::process::id()));
+        // SAFETY: Einzelner Test-Thread, kein paralleler Env-Zugriff.
+        unsafe { std::env::set_var(CACHE_ENV, &path) };
+        let _ = std::fs::remove_file(&path);
+
+        // Fern-Zukunft-Ablauf, damit load() den Eintrag unabhängig vom realen
+        // Testdatum behält; das Ablaufverhalten prüfen wir separat via get().
+        let raws = vec![RawOffer { name: "Butter".into(), price: Some(1.49), unit: Some("250 g".into()) }];
+        let mut c = VisionCache::load();
+        c.put("hashA".into(), raws.clone(), Some("2999-12-31"));
+        c.save();
+
+        // Frisch von der Platte: Treffer solange today <= expires.
+        let reloaded = VisionCache::load();
+        let hit = reloaded.get("hashA", "2026-07-15").expect("Cache-Treffer");
+        assert_eq!(hit.len(), 1);
+        assert_eq!(hit[0].name, "Butter");
+        assert_eq!(hit[0].price, Some(1.49));
+        // Nach Ablauf (today > expires) kein Treffer mehr.
+        assert!(reloaded.get("hashA", "3000-01-01").is_none(), "abgelaufen");
+
+        // load() verwirft abgelaufene Einträge dauerhaft.
+        unsafe { std::env::set_var(CACHE_ENV, &path) };
+        let raws2 = vec![RawOffer { name: "Alt".into(), price: Some(0.99), unit: None }];
+        let mut old = VisionCache::load();
+        old.put("hashOld".into(), raws2, Some("2000-01-01")); // längst abgelaufen
+        old.save();
+        let after = VisionCache::load();
+        assert!(after.get("hashOld", "2026-07-15").is_none(), "abgelaufen wird beim Laden verworfen");
+
+        let _ = std::fs::remove_file(&path);
+        unsafe { std::env::remove_var(CACHE_ENV) };
     }
 
     #[test]
