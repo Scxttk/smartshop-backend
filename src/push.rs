@@ -409,13 +409,16 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
             continue;
         }
 
-        // Veraltete Wochen dieses Markts löschen — nur wenn neue Daten mit
-        // Gültigkeitsdatum vorliegen. Legacy-Zeilen ohne valid_from (alte
-        // Scraper-Läufe) matchen `lt.` nie und müssen explizit mit weg.
+        // Veraltete Wochen dieses Markts in DIESER Region löschen — nur wenn
+        // neue Daten mit Gültigkeitsdatum vorliegen. Legacy-Zeilen ohne
+        // valid_from (alte Scraper-Läufe) matchen `lt.` nie und müssen
+        // explizit mit weg. Der Region-Filter verhindert, dass der Push einer
+        // Region die noch nicht neu gesyncten Wochen anderer Regionen löscht.
         if let Some(current) = rows.iter().filter_map(|r| r.valid_from.as_deref()).max() {
             let resp = auth(client.delete(&offers_url))
                 .query(&[
                     ("market", format!("eq.{chain}")),
+                    ("region", format!("eq.{region}")),
                     ("or", format!("(valid_from.lt.{current},valid_from.is.null)")),
                 ])
                 .send()

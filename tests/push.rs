@@ -325,6 +325,8 @@ fn push_batches_deletes_and_upserts() {
     assert_eq!(del.method, "DELETE");
     assert!(del.target.starts_with("/rest/v1/offers?"), "{}", del.target);
     assert!(del.target.contains("market=eq.REWE"), "{}", del.target);
+    // Nur die gepushte Region aufräumen — andere Regionen bleiben unberührt.
+    assert!(del.target.contains("region=eq.01219"), "{}", del.target);
     // Löscht alte Wochen UND Legacy-Zeilen ohne valid_from (URL-encodiert:
     // or=(valid_from.lt.2026-07-13,valid_from.is.null))
     let decoded = del.target.replace("%28", "(").replace("%29", ")").replace("%2C", ",");
