@@ -31,6 +31,10 @@ jobs:
       REWE_SECRETS_SET: ${{ secrets.REWE_CERT_PEM != '' && secrets.REWE_KEY_PEM != '' }}
       DB: ${{ github.workspace }}/nightly.db
       LOG: ${{ github.workspace }}/nightly.log
+      # Lidl-Prospekt-Extraktionen über die Woche cachen, damit der nächtliche
+      # Multi-Region-Sync nicht jede Nacht ~180 Vision-Calls macht (Free-Limit
+      # 150/Tag). Runner sind ephemer -> per actions/cache persistieren.
+      LIDL_PROSPEKT_CACHE: ${{ github.workspace }}/lidl-flyer-cache.json
     steps:
       - uses: actions/checkout@v4
 
@@ -110,6 +114,23 @@ jobs:
           echo "cert=$CERT" >> "$GITHUB_OUTPUT"
           echo "key=$KEY" >> "$GITHUB_OUTPUT"
 
+      # Cache der Lidl-Prospekt-Extraktionen laden. Rollierender Schlüssel:
+      # eindeutig pro Lauf (run_id), Wiederherstellung über den Wochen-Präfix.
+      # So sammelt jeder Lauf neue Seiten ein und speichert sie, statt bei einem
+      # Key-Treffer nichts mehr zu sichern (immutable-cache-Muster). Der ISO-
+      # Wochenschlüssel (%G-W%V) lässt alte Prospektwochen automatisch altern.
+      - name: Flyer-Wochen-Schlüssel
+        id: flyerweek
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Lidl flyer cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.LIDL_PROSPEKT_CACHE }}
+          key: lidl-flyer-${{ steps.flyerweek.outputs.week }}-${{ github.run_id }}
+          restore-keys: |
+            lidl-flyer-${{ steps.flyerweek.outputs.week }}-
+
       # Primärpfad: alle aktiven Regionen aus public.regions syncen
       # (fetch + markets-Upsert + push pro PLZ). Rewe wird nur mitgezogen, wenn
       # oben Cert+Key eingerichtet wurden (--cert/--key gesetzt); sonst schlägt
@@ -166,6 +187,16 @@ jobs:
             ${CERT_ARGS[@]+"${CERT_ARGS[@]}"} 2>&1 | tee -a "$LOG"
           ./target/release/smartshop push --region "$SMARTSHOP_ZIP" --db "$DB" \
             2>&1 | tee -a "$LOG"
+
+      # Aktualisierten Cache sichern (auch bei Teil-Fehlern), damit die diese
+      # Nacht extrahierten Seiten der nächsten Nacht erspart bleiben. Fehlt die
+      # Datei (kein Token / Lidl übersprungen), warnt der Step nur.
+      - name: Save Lidl flyer cache
+        if: always() && hashFiles('lidl-flyer-cache.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.LIDL_PROSPEKT_CACHE }}
+          key: lidl-flyer-${{ steps.flyerweek.outputs.week }}-${{ github.run_id }}
 
       - name: Store summary + zero-offer check
         if: always()
