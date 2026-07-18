@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{Context, Result, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::models::{Market, Offer};
 use crate::{db, enrich, storage, units};
@@ -15,7 +15,7 @@ use crate::{db, enrich, storage, units};
 pub const BATCH_SIZE: usize = 100;
 
 /// Zeile im Supabase-Schema (schema.sql + migration_v2.sql + migration_regions.sql).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SupabaseRow {
     pub market: String,
     pub product: String,
@@ -213,6 +213,11 @@ pub struct PushOptions {
     /// Produktbilder in den Supabase-Storage-Bucket spiegeln (Händler-URL ->
     /// Bucket-URL). Bei --dry-run wird ohnehin nicht gespiegelt.
     pub mirror_images: bool,
+    /// Bilder erst NACH dem Offers-Upsert spiegeln (On-Demand-Pfad): Phase 1
+    /// upsertet sofort mit Händler-URL bzw. null (Emoji-Fallback der App),
+    /// Phase 2 spiegelt und upsertet die gespiegelten Zeilen erneut. So sind
+    /// Angebote in Sekunden sichtbar statt hinter Hunderten Bild-Uploads.
+    pub defer_mirror: bool,
 }
 
 /// Upload-fertige Zeilen einer Kette plus Zähler der übersprungenen Angebote.
@@ -313,9 +318,9 @@ fn mirror_images(
     groups: &mut BTreeMap<&'static str, ChainRows>,
     cfg: &PushConfig,
     db_path: &str,
+    client: &reqwest::blocking::Client,
 ) -> Result<(usize, usize, usize)> {
     let conn = db::open(db_path)?;
-    let client = reqwest::blocking::Client::new();
     let (mut fresh, mut cached, mut failed) = (0usize, 0usize, 0usize);
 
     for (_chain, g) in groups.iter_mut() {
@@ -330,7 +335,7 @@ fn mirror_images(
                 cached += 1;
                 continue;
             }
-            match storage::mirror(&client, cfg, &src) {
+            match storage::mirror(client, cfg, &src) {
                 Ok(public) => {
                     db::cache_image_url(&conn, &src, &public)?;
                     row.image_url = Some(public);
@@ -371,6 +376,30 @@ fn push_history(
     Ok(rows.len())
 }
 
+/// Zeilen in Batches nach `public.offers` upserten (Konfliktschlüssel wie
+/// Schema: market, product, valid_from, region).
+pub fn upsert_offer_rows(
+    client: &reqwest::blocking::Client,
+    cfg: &PushConfig,
+    rows: &[SupabaseRow],
+    what: &str,
+) -> Result<()> {
+    let url = format!("{}/rest/v1/offers", cfg.base_url);
+    for batch in rows.chunks(BATCH_SIZE) {
+        let resp = client
+            .post(&url)
+            .header("apikey", &cfg.api_key)
+            .header("Authorization", format!("Bearer {}", cfg.api_key))
+            .query(&[("on_conflict", "market,product,valid_from,region")])
+            .header("Prefer", "resolution=merge-duplicates")
+            .json(batch)
+            .send()
+            .with_context(|| format!("Supabase nicht erreichbar ({})", cfg.base_url))?;
+        check_response(&format!("{what}: Upsert von {} Angeboten", batch.len()), resp)?;
+    }
+    Ok(())
+}
+
 pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
     let mut groups = load_grouped(opts)?;
     if groups.is_empty() {
@@ -390,14 +419,15 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
         None => &config_from_env()?,
     };
 
+    let client = reqwest::blocking::Client::new();
+
     // Produktbilder in den Storage-Bucket spiegeln, bevor die Zeilen hochgeladen
     // werden — so trägt image_url die stabile Bucket-URL statt der Händler-URL.
-    if opts.mirror_images {
-        let (fresh, cached, failed) = mirror_images(&mut groups, cfg, &opts.db_path)?;
+    // Im defer_mirror-Modus passiert das erst NACH dem Upsert (Phase 2 unten).
+    if opts.mirror_images && !opts.defer_mirror {
+        let (fresh, cached, failed) = mirror_images(&mut groups, cfg, &opts.db_path, &client)?;
         println!("Bilder: {fresh} neu gespiegelt, {cached} aus Cache, {failed} fehlgeschlagen.");
     }
-
-    let client = reqwest::blocking::Client::new();
     let offers_url = format!("{}/rest/v1/offers", cfg.base_url);
     let auth = |req: reqwest::blocking::RequestBuilder| {
         req.header("apikey", &cfg.api_key)
@@ -432,15 +462,7 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
             check_response(&format!("[{chain}] Löschen veralteter Angebote"), resp)?;
         }
 
-        for batch in rows.chunks(BATCH_SIZE) {
-            let resp = auth(client.post(&offers_url))
-                .query(&[("on_conflict", "market,product,valid_from,region")])
-                .header("Prefer", "resolution=merge-duplicates")
-                .json(batch)
-                .send()
-                .with_context(|| format!("Supabase nicht erreichbar ({})", cfg.base_url))?;
-            check_response(&format!("[{chain}] Upsert von {} Angeboten", batch.len()), resp)?;
-        }
+        upsert_offer_rows(&client, cfg, rows, &format!("[{chain}]"))?;
         total += rows.len();
         println!("  [{chain}] {} Angebote hochgeladen ({}).", rows.len(), skipped_note(g));
     }
@@ -468,5 +490,24 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
     check_response(&format!("Region {region} eintragen"), resp)?;
 
     println!("Fertig: {total} Angebote nach Supabase gepusht (Region {region}).");
+
+    // Phase 2 (defer_mirror): Bilder jetzt spiegeln und die betroffenen Zeilen
+    // erneut upserten — die App zeigt die Angebote längst, hier kommen nur noch
+    // die stabilen Bucket-URLs nach.
+    if opts.mirror_images && opts.defer_mirror {
+        let (fresh, cached, failed) = mirror_images(&mut groups, cfg, &opts.db_path, &client)?;
+        println!("Bilder (Phase 2): {fresh} neu gespiegelt, {cached} aus Cache, {failed} fehlgeschlagen.");
+        let bucket_marker = format!("/{}/", storage::BUCKET);
+        let mirrored: Vec<SupabaseRow> = groups
+            .values()
+            .flat_map(|g| &g.rows)
+            .filter(|r| r.image_url.as_deref().is_some_and(|u| u.contains(&bucket_marker)))
+            .cloned()
+            .collect();
+        if !mirrored.is_empty() {
+            upsert_offer_rows(&client, cfg, &mirrored, "Bild-Nachtrag")?;
+            println!("Bild-Nachtrag: {} Zeilen mit Bucket-URLs aktualisiert.", mirrored.len());
+        }
+    }
     Ok(())
 }

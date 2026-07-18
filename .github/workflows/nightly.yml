@@ -46,9 +46,37 @@ jobs:
           command -v sqlite3 >/dev/null || { sudo apt-get update && sudo apt-get install -y sqlite3; }
           sqlite3 --version
 
+      # On-Demand-Pfad: vorgebautes Binary aus dem letzten erfolgreichen
+      # CI-Lauf auf master laden statt ~6 min zu bauen. Fallback: normaler
+      # Build, wenn (noch) kein Artefakt existiert oder es abgelaufen ist.
+      - name: Download prebuilt binary (on-demand)
+        id: prebuilt
+        if: inputs.plz != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          FOUND=false
+          RUN_ID=$(gh run list --workflow ci.yml --branch master --status success \
+            --limit 1 --json databaseId --jq '.[0].databaseId' || true)
+          if [ -n "$RUN_ID" ] \
+              && gh run download "$RUN_ID" --name smartshop-linux-x86_64 --dir prebuilt \
+              && [ -f prebuilt/smartshop ]; then
+            mkdir -p target/release
+            install -m 0755 prebuilt/smartshop target/release/smartshop
+            if ./target/release/smartshop --help >/dev/null 2>&1; then
+              echo "Prebuilt Binary aus CI-Lauf $RUN_ID übernommen."
+              FOUND=true
+            fi
+          fi
+          [ "$FOUND" = true ] || echo "::warning::Kein brauchbares CI-Artefakt — baue selbst."
+          echo "found=$FOUND" >> "$GITHUB_OUTPUT"
+
       - uses: Swatinem/rust-cache@v2
+        if: steps.prebuilt.outputs.found != 'true'
 
       - name: Build release
+        if: steps.prebuilt.outputs.found != 'true'
         run: cargo build --release
 
       # Rewe-Client-Zertifikat einrichten — nur wenn die Secrets gesetzt sind.

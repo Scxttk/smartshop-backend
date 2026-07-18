@@ -11,6 +11,11 @@ use smartshop::models::{Market, Offer};
 use smartshop::push::PushConfig;
 use smartshop::sync::{self, FetchResult, SyncOptions};
 
+/// Finder-Stub für Tests ohne nationale Ketten: nirgends eine Filiale.
+fn no_finder(_chain: &str, _plz: &str) -> anyhow::Result<Option<Market>> {
+    Ok(None)
+}
+
 fn offer(title: &str, price: Option<f64>) -> Offer {
     Offer {
         id: Offer::build_id("m1", title, Some("2026-07-13")),
@@ -198,7 +203,7 @@ fn cap_limits_number_of_synced_regions() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let fetcher = ok_fetcher(calls.clone());
     let db_path = temp_db("cap");
-    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher).unwrap();
+    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher, &no_finder).unwrap();
 
     let called = calls.lock().unwrap().clone();
     assert_eq!(called.len(), 10, "nur max_regions Regionen syncen: {called:?}");
@@ -212,7 +217,7 @@ fn markets_upsert_sends_expected_payload() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let fetcher = ok_fetcher(calls);
     let db_path = temp_db("markets");
-    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher).unwrap();
+    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher, &no_finder).unwrap();
 
     let reqs = log.lock().unwrap().clone();
     let markets: Vec<&Req> = reqs
@@ -257,7 +262,7 @@ fn per_region_failure_does_not_abort_run() {
         }
     };
     let db_path = temp_db("isolation");
-    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher).unwrap();
+    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher, &no_finder).unwrap();
 
     assert_eq!(calls.lock().unwrap().len(), 2, "beide Regionen versucht");
     let reqs = log.lock().unwrap().clone();
@@ -276,7 +281,7 @@ fn all_regions_failing_returns_error() {
     let fetcher =
         |_plz: &str| -> FetchResult { vec![("REWE".to_string(), Err(anyhow!("Scraper kaputt")))] };
     let db_path = temp_db("allfail");
-    let err = sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher).unwrap_err();
+    let err = sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher, &no_finder).unwrap_err();
     assert!(err.to_string().contains("Alle 2 Region(en) fehlgeschlagen"), "Fehler: {err:#}");
 }
 
@@ -285,7 +290,7 @@ fn empty_regions_table_returns_error() {
     let (base_url, _log) = spawn_mock("[]");
     let fetcher = ok_fetcher(Arc::new(Mutex::new(Vec::new())));
     let db_path = temp_db("empty");
-    let err = sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher).unwrap_err();
+    let err = sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher, &no_finder).unwrap_err();
     assert!(err.to_string().contains("Keine aktiven Regionen"), "Fehler: {err:#}");
 }
 
@@ -294,7 +299,7 @@ fn unreachable_or_failing_supabase_returns_error() {
     let base_url = spawn_failing_mock(500, "kaputt");
     let fetcher = ok_fetcher(Arc::new(Mutex::new(Vec::new())));
     let db_path = temp_db("unreachable");
-    let err = sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher).unwrap_err();
+    let err = sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher, &no_finder).unwrap_err();
     assert!(err.to_string().contains("Regionen laden fehlgeschlagen"), "Fehler: {err:#}");
 }
 
@@ -304,7 +309,7 @@ fn dry_run_only_reads_regions() {
     let fetcher = ok_fetcher(Arc::new(Mutex::new(Vec::new())));
     let db_path = temp_db("dryrun");
     let opts = SyncOptions { db_path, dry_run: true, max_regions: 10, only: None };
-    sync::run(&opts, Some(&cfg(&base_url)), &fetcher).unwrap();
+    sync::run(&opts, Some(&cfg(&base_url)), &fetcher, &no_finder).unwrap();
 
     let reqs = log.lock().unwrap().clone();
     assert_eq!(reqs.len(), 1, "nur der regions-GET erwartet: {reqs:#?}");
@@ -324,7 +329,7 @@ fn only_mode_registers_and_syncs_single_plz_without_region_list() {
         max_regions: 10,
         only: Some("04626".to_string()),
     };
-    sync::run(&opts, Some(&cfg(&base_url)), &fetcher).unwrap();
+    sync::run(&opts, Some(&cfg(&base_url)), &fetcher, &no_finder).unwrap();
 
     // Genau die eine PLZ wurde gescrapet …
     assert_eq!(calls.lock().unwrap().clone(), vec!["04626"]);
@@ -356,7 +361,7 @@ fn chain_without_nearby_branch_is_skipped_not_failed() {
         result
     };
     let db_path = temp_db("no-branch");
-    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher).unwrap();
+    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher, &no_finder).unwrap();
 
     let reqs = log.lock().unwrap().clone();
     let markets: Vec<&Req> = reqs
@@ -396,11 +401,210 @@ fn chain_error_keeps_existing_market_row() {
         result
     };
     let db_path = temp_db("chain-err");
-    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher).unwrap();
+    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher, &no_finder).unwrap();
 
     let reqs = log.lock().unwrap().clone();
     assert!(
         !reqs.iter().any(|r| r.method == "DELETE" && r.target.starts_with("/rest/v1/markets")),
         "Fehler darf keine Markt-Zeile löschen: {reqs:#?}"
+    );
+}
+
+// ------------------------------------------------- Vorab-Kopie (Seeding)
+
+/// Wie spawn_mock, aber GET-Antworten sind pro Ziel-Substring konfigurierbar
+/// (erste passende Route gewinnt); alles andere 200 `[]`.
+fn spawn_routed_mock(
+    routes: &'static [(&'static str, &'static str)],
+) -> (String, Arc<Mutex<Vec<Req>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let log: Arc<Mutex<Vec<Req>>> = Arc::new(Mutex::new(Vec::new()));
+    let log2 = log.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { break };
+            let mut reader = BufReader::new(stream);
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                let mut parts = line.split_whitespace();
+                let (Some(method), Some(target)) = (parts.next(), parts.next()) else { break };
+                let (method, target) = (method.to_string(), target.to_string());
+                let mut headers = Vec::new();
+                let mut content_length = 0usize;
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    let h = h.trim_end().to_string();
+                    if h.is_empty() {
+                        break;
+                    }
+                    if let Some((k, v)) = h.split_once(':') {
+                        let (k, v) = (k.trim().to_string(), v.trim().to_string());
+                        if k.eq_ignore_ascii_case("content-length") {
+                            content_length = v.parse().unwrap_or(0);
+                        }
+                        headers.push((k, v));
+                    }
+                }
+                let mut body = vec![0u8; content_length];
+                if content_length > 0 {
+                    reader.read_exact(&mut body).unwrap();
+                }
+                let payload = if method == "GET" {
+                    routes
+                        .iter()
+                        .find(|(needle, _)| target.contains(needle))
+                        .map(|(_, body)| *body)
+                        .unwrap_or("[]")
+                } else {
+                    "[]"
+                };
+                log2.lock().unwrap().push(Req {
+                    method,
+                    target,
+                    headers,
+                    body: String::from_utf8_lossy(&body).into_owned(),
+                });
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{payload}",
+                    payload.len()
+                );
+                if reader.get_mut().write_all(resp.as_bytes()).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    (format!("http://{addr}"), log)
+}
+
+/// Eine kopierbare Lidl-Quellzeile im offers-Schema (Region 01219).
+const LIDL_SOURCE_ROW: &str = r#"[{
+    "market": "Lidl", "product": "Bio-Gouda", "price": 1.99,
+    "regular_price": 2.79, "unit": "Stück", "category": "Molkerei & Eier",
+    "emoji": "🧀", "image_url": null,
+    "valid_from": "2026-07-13", "valid_until": "2026-07-19",
+    "base_price": null, "base_unit": null, "brand": null, "ean": null,
+    "source": "smartshop-rust", "region": "01219"
+}]"#;
+
+#[test]
+fn only_mode_copies_national_chain_offers_before_scraping() {
+    static ROUTES: [(&str, &str); 2] = [
+        // Wochen-Suche (limit=1) vor der Zeilen-Suche matchen.
+        ("limit=1", r#"[{"valid_from":"2026-07-13","region":"01219"}]"#),
+        ("valid_from=eq.2026-07-13", LIDL_SOURCE_ROW),
+    ];
+    let (base_url, log) = spawn_routed_mock(&ROUTES);
+    let fetcher = ok_fetcher(Arc::new(Mutex::new(Vec::new())));
+    // Lidl hat eine Filiale, ALDI Nord keine, ALDI SÜD-Finder ist kaputt.
+    let finder = |chain: &str, _plz: &str| -> anyhow::Result<Option<Market>> {
+        match chain {
+            "Lidl" => Ok(Some(
+                Market::new("LIDL_123", "Lidl Berlin").with_geo(Some(52.5), Some(13.4)),
+            )),
+            "ALDI Nord" => Ok(None),
+            _ => Err(anyhow!("Finder kaputt")),
+        }
+    };
+    let db_path = temp_db("seed");
+    let opts = SyncOptions {
+        db_path,
+        dry_run: false,
+        max_regions: 10,
+        only: Some("10115".to_string()),
+    };
+    sync::run(&opts, Some(&cfg(&base_url)), &fetcher, &finder).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    // Die Kopie upsertet die Quellzeile mit der NEUEN Region und dem
+    // regulären Konfliktschlüssel …
+    let copy = reqs
+        .iter()
+        .find(|r| {
+            r.method == "POST"
+                && r.target.starts_with("/rest/v1/offers")
+                && r.body.contains("Bio-Gouda")
+        })
+        .expect("Vorab-Kopie-Upsert fehlt");
+    let rows: serde_json::Value = serde_json::from_str(&copy.body).unwrap();
+    assert_eq!(rows[0]["region"], "10115");
+    assert_eq!(rows[0]["market"], "Lidl");
+    assert_eq!(rows[0]["price"], 1.99);
+    assert!(
+        copy.target.contains("on_conflict=market%2Cproduct%2Cvalid_from%2Cregion")
+            || copy.target.contains("on_conflict=market,product,valid_from,region"),
+        "{}",
+        copy.target
+    );
+    // … und meldet die Lidl-Filiale nach markets, BEVOR der Scrape-Push kommt.
+    let market_pos = reqs
+        .iter()
+        .position(|r| {
+            r.method == "POST"
+                && r.target.starts_with("/rest/v1/markets")
+                && r.body.contains("LIDL_123")
+        })
+        .expect("markets-Upsert der Vorab-Kopie fehlt");
+    let scrape_pos = reqs
+        .iter()
+        .position(|r| {
+            r.method == "POST" && r.target.starts_with("/rest/v1/offers") && r.body.contains("REWE")
+        })
+        .unwrap_or(usize::MAX);
+    assert!(market_pos < scrape_pos, "Seeding muss vor dem Scrape-Push laufen");
+
+    // ALDI Nord (keine Filiale) und ALDI SÜD (Finder-Fehler) werden nicht
+    // kopiert: nur die beiden Lidl-GETs auf offers.
+    let offer_gets: Vec<&Req> = reqs
+        .iter()
+        .filter(|r| r.method == "GET" && r.target.starts_with("/rest/v1/offers"))
+        .collect();
+    assert_eq!(offer_gets.len(), 2, "{offer_gets:#?}");
+    assert!(offer_gets.iter().all(|r| r.target.contains("market=eq.Lidl")));
+}
+
+#[test]
+fn full_sync_never_calls_branch_finder() {
+    let (base_url, _log) = spawn_mock(r#"[{"plz":"01219"}]"#);
+    let fetcher = ok_fetcher(Arc::new(Mutex::new(Vec::new())));
+    let finder = |_: &str, _: &str| -> anyhow::Result<Option<Market>> {
+        panic!("Voll-Sync darf keinen Filial-Lookup fürs Seeding machen")
+    };
+    let db_path = temp_db("noseed");
+    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher, &finder).unwrap();
+}
+
+#[test]
+fn seeding_without_source_offers_copies_nothing() {
+    // Wochen-Suche liefert leer — es gibt noch keine gültigen Lidl-Angebote.
+    let (base_url, log) = spawn_mock("[]");
+    let fetcher = ok_fetcher(Arc::new(Mutex::new(Vec::new())));
+    let finder = |_: &str, _: &str| -> anyhow::Result<Option<Market>> {
+        Ok(Some(Market::new("LIDL_1", "Lidl Test")))
+    };
+    let db_path = temp_db("seed-empty");
+    let opts = SyncOptions {
+        db_path,
+        dry_run: false,
+        max_regions: 10,
+        only: Some("10115".to_string()),
+    };
+    sync::run(&opts, Some(&cfg(&base_url)), &fetcher, &finder).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    // Kein Kopier-Upsert mit fremden Produkten — nur der reguläre Scrape-Push.
+    assert!(
+        !reqs.iter().any(|r| r.method == "POST"
+            && r.target.starts_with("/rest/v1/markets")
+            && r.body.contains("LIDL_1")
+            && !r.body.contains("REWE")),
+        "ohne Quell-Angebote darf keine Filiale gemeldet werden: {reqs:#?}"
     );
 }
