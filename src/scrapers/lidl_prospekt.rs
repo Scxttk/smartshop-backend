@@ -304,10 +304,49 @@ Wenn kein Preis erkennbar ist, lass das Angebot weg. Nur das JSON-Array, kein we
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawOffer {
     pub name: String,
-    #[serde(default)]
+    // Vision-Modelle liefern den Preis mal als Zahl (1.99), mal als String
+    // ("1,99", "1.99 €", "€ 2,49"). Ohne toleranten Deserializer würde ein
+    // einziger String-Preis das Parsen des GESAMTEN Arrays scheitern lassen
+    // und damit die ganze Seite verwerfen. Darum: Zahl ODER String akzeptieren,
+    // Komma als Dezimaltrenner und Währungssymbole/Text robust abstreifen.
+    #[serde(default, deserialize_with = "deserialize_price")]
     pub price: Option<f64>,
     #[serde(default)]
     pub unit: Option<String>,
+}
+
+fn deserialize_price<'de, D>(de: D) -> std::result::Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match Option::<serde_json::Value>::deserialize(de)? {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => Ok(n.as_f64()),
+        Some(serde_json::Value::String(s)) => Ok(parse_price_str(&s)),
+        // Unerwarteter Typ (bool/array/object): defensiv als None, nicht Fehler.
+        Some(_) => Ok(None),
+    }
+}
+
+/// "1,99 €" / "€ 2.49" / "ab 0,89" -> Some(1.99) usw. Nimmt die erste
+/// Dezimalzahl, behandelt Komma als Dezimaltrenner. None, wenn keine Zahl.
+pub fn parse_price_str(s: &str) -> Option<f64> {
+    let mut num = String::new();
+    for c in s.chars() {
+        match c {
+            '0'..='9' => num.push(c),
+            '.' | ',' => num.push('.'),
+            _ if num.is_empty() => {} // führenden Text ("ab", "€") überspringen
+            _ => break,               // Zahl fertig, Rest (Einheit) ignorieren
+        }
+    }
+    // Mehrere Trenner (z. B. "1.234,50") auf den letzten reduzieren.
+    if num.matches('.').count() > 1 {
+        if let Some(idx) = num.rfind('.') {
+            num = format!("{}.{}", num[..idx].replace('.', ""), &num[idx + 1..]);
+        }
+    }
+    num.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 async fn vision_extract(
@@ -464,6 +503,51 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_price_str_handles_string_formats() {
+        assert_eq!(parse_price_str("1,99"), Some(1.99));
+        assert_eq!(parse_price_str("1.99"), Some(1.99));
+        assert_eq!(parse_price_str("1,99 €"), Some(1.99));
+        assert_eq!(parse_price_str("€ 2,49"), Some(2.49));
+        assert_eq!(parse_price_str("ab 0,89"), Some(0.89));
+        assert_eq!(parse_price_str("1.234,50"), Some(1234.50));
+        assert_eq!(parse_price_str("keine Zahl"), None);
+        assert_eq!(parse_price_str(""), None);
+    }
+
+    #[test]
+    fn deserialize_price_accepts_number_or_string_without_dropping_array() {
+        // Gemischtes Array (Zahl, deutscher String, Währungsstring, null):
+        // ein einziger String-Preis darf nicht das ganze Array killen.
+        let raws: Vec<RawOffer> = serde_json::from_str(
+            r#"[
+                {"name":"A","price":1.99},
+                {"name":"B","price":"2,49 €"},
+                {"name":"C","price":"€ 0,89"},
+                {"name":"D","price":null}
+            ]"#,
+        )
+        .expect("mixed price types parsen");
+        assert_eq!(raws.len(), 4);
+        assert_eq!(raws[0].price, Some(1.99));
+        assert_eq!(raws[1].price, Some(2.49));
+        assert_eq!(raws[2].price, Some(0.89));
+        assert_eq!(raws[3].price, None);
+    }
+
+    #[test]
+    fn parse_llm_response_survives_string_prices() {
+        // Vollständiger Weg inkl. Fences: früher hätte ein String-Preis das
+        // ganze Array (und damit die Seite) verworfen.
+        let content = "```json\n[{\"name\":\"Butter\",\"price\":\"1,49 €\",\"unit\":\"250 g\"}]\n```";
+        let raws = parse_llm_response(content);
+        assert_eq!(raws.len(), 1);
+        let offer = build_offer(&raws[0], "LIDL_DE", Some("2026-07-13"), Some("2026-07-18"), 3)
+            .expect("Butter-Angebot");
+        assert_eq!(offer.price, Some(1.49));
+        assert_eq!(offer.subtitle.as_deref(), Some("250 g"));
+    }
 
     #[test]
     #[ignore = "Live-Test gegen Schwarz-API + GitHub Models: \
