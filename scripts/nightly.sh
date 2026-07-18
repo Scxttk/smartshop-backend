@@ -105,6 +105,11 @@ fi
 [ -n "${SUPABASE_SERVICE_KEY:-}" ] || fail "SUPABASE_SERVICE_KEY ist in $ENV_FILE nicht gesetzt."
 export SUPABASE_URL="${SUPABASE_URL:-}" SUPABASE_SERVICE_KEY="${SUPABASE_SERVICE_KEY:-}"
 
+# launchd startet mit minimalem PATH; smartshop ruft das `rewerse`-Binary aber
+# über den PATH auf (Command::new("rewerse")). Cargo-/Go-bin voranstellen, damit
+# der Rewe-Scraper es auch im nächtlichen Lauf findet.
+export PATH="$HOME/.cargo/bin:$HOME/go/bin:$PATH"
+
 # Rewe-Zertifikat ist optional; ohne läuft --all-stores durch, Rewe erscheint
 # dann als Fehler in der Zusammenfassung (siehe docs/rewe-cert.md).
 CERT_ARGS=()

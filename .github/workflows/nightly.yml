@@ -41,9 +41,41 @@ jobs:
       - name: Build release
         run: cargo build --release
 
+      # Rewe-Client-Zertifikat einrichten — nur wenn die Secrets gesetzt sind.
+      # Ohne Secrets bleibt REWE_CERT/REWE_KEY leer und der Sync läuft wie
+      # bisher ohne Rewe durch (kein Fehler). Die Secrets liegen als PEM oder
+      # base64-kodiertes PEM vor (base64 -d schlägt bei Plain-PEM nicht fehl,
+      # solange es gültiges base64 ist; wir dekodieren immer und schreiben das
+      # Ergebnis — bei Plain-PEM setze base64-kodierte Secrets via `gh secret set`).
+      - name: Setup Go (für rewerse)
+        if: ${{ secrets.REWE_CERT_PEM != '' && secrets.REWE_KEY_PEM != '' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Setup rewerse + Rewe-Zertifikat
+        id: rewe
+        if: ${{ secrets.REWE_CERT_PEM != '' && secrets.REWE_KEY_PEM != '' }}
+        env:
+          REWE_CERT_PEM: ${{ secrets.REWE_CERT_PEM }}
+          REWE_KEY_PEM: ${{ secrets.REWE_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          go install github.com/ByteSizedMarius/rewerse-engineering/cmd@latest
+          ln -sf "$(go env GOPATH)/bin/cmd" "$(go env GOPATH)/bin/rewerse"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          CERT="$RUNNER_TEMP/rewe-cert.pem"
+          KEY="$RUNNER_TEMP/rewe-private.key"
+          printf '%s' "$REWE_CERT_PEM" | base64 -d > "$CERT"
+          printf '%s' "$REWE_KEY_PEM"  | base64 -d > "$KEY"
+          chmod 600 "$CERT" "$KEY"
+          echo "cert=$CERT" >> "$GITHUB_OUTPUT"
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
       # Primärpfad: alle aktiven Regionen aus public.regions syncen
-      # (fetch + markets-Upsert + push pro PLZ). REWE läuft ohne
-      # Client-Zertifikat und schlägt pro Store fehl; das ist erwartet.
+      # (fetch + markets-Upsert + push pro PLZ). Rewe wird nur mitgezogen, wenn
+      # oben Cert+Key eingerichtet wurden (--cert/--key gesetzt); sonst schlägt
+      # Rewe pro Store fehl, das ist dann erwartet.
       # Schlägt der ganze Sync fehl (Tabelle leer/unerreichbar, alle
       # Regionen gescheitert), greift der Fallback-Step unten.
       - name: Sync regions (fetch+push per region)
@@ -51,9 +83,15 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          REWE_CERT: ${{ steps.rewe.outputs.cert }}
+          REWE_KEY: ${{ steps.rewe.outputs.key }}
         run: |
           set -o pipefail
-          if ./target/release/smartshop sync-regions --db "$DB" 2>&1 | tee "$LOG"; then
+          CERT_ARGS=()
+          [ -n "${REWE_CERT:-}" ] && [ -f "$REWE_CERT" ] && CERT_ARGS+=(--cert "$REWE_CERT")
+          [ -n "${REWE_KEY:-}" ] && [ -f "$REWE_KEY" ] && CERT_ARGS+=(--key "$REWE_KEY")
+          if ./target/release/smartshop sync-regions --db "$DB" \
+              ${CERT_ARGS[@]+"${CERT_ARGS[@]}"} 2>&1 | tee "$LOG"; then
             echo "sync_failed=false" >> "$GITHUB_OUTPUT"
           else
             echo "sync_failed=true" >> "$GITHUB_OUTPUT"
@@ -67,10 +105,16 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          REWE_CERT: ${{ steps.rewe.outputs.cert }}
+          REWE_KEY: ${{ steps.rewe.outputs.key }}
         run: |
           set -o pipefail
+          CERT_ARGS=()
+          [ -n "${REWE_CERT:-}" ] && [ -f "$REWE_CERT" ] && CERT_ARGS+=(--cert "$REWE_CERT")
+          [ -n "${REWE_KEY:-}" ] && [ -f "$REWE_KEY" ] && CERT_ARGS+=(--key "$REWE_KEY")
           ./target/release/smartshop fetch --all-stores \
-            --zip "$SMARTSHOP_ZIP" --db "$DB" 2>&1 | tee -a "$LOG"
+            --zip "$SMARTSHOP_ZIP" --db "$DB" \
+            ${CERT_ARGS[@]+"${CERT_ARGS[@]}"} 2>&1 | tee -a "$LOG"
           ./target/release/smartshop push --region "$SMARTSHOP_ZIP" --db "$DB" \
             2>&1 | tee -a "$LOG"
 
