@@ -121,6 +121,19 @@ fi
 [ -n "${SUPABASE_SERVICE_KEY:-}" ] || fail "SUPABASE_SERVICE_KEY ist in $ENV_FILE nicht gesetzt."
 export SUPABASE_URL="${SUPABASE_URL:-}" SUPABASE_SERVICE_KEY="${SUPABASE_SERVICE_KEY:-}"
 
+# GitHub-Models-Token für die Lidl-Prospekt-KI an smartshop durchreichen. Ohne
+# das Token schlägt nur Lidl fehl (kein harter Abbruch) — dann per
+# LIDL_SOURCE=marktguru auf die Altquelle ausweichbar. Falls in der Env-Datei
+# nicht gesetzt, als Fallback von der GitHub-CLI holen (sofern verfügbar).
+if [ -z "${GITHUB_MODELS_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
+    GITHUB_MODELS_TOKEN="$(gh auth token 2>/dev/null || true)"
+fi
+if [ -n "${GITHUB_MODELS_TOKEN:-}" ]; then
+    export GITHUB_MODELS_TOKEN
+else
+    log "WARNUNG: GITHUB_MODELS_TOKEN nicht gesetzt — Lidl-Prospekt-KI wird fehlschlagen."
+fi
+
 # launchd startet mit minimalem PATH; smartshop ruft das `rewerse`-Binary aber
 # über den PATH auf (Command::new("rewerse")). Cargo-/Go-bin voranstellen, damit
 # der Rewe-Scraper es auch im nächtlichen Lauf findet.

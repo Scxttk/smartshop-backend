@@ -121,6 +121,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          # Lidl läuft standardmäßig über den KI-Prospekt; ohne dieses Secret
+          # schlägt nur Lidl fehl. Der eingebaute GITHUB_TOKEN taugt NICHT — es
+          # braucht ein PAT mit Models-Zugriff (gh secret set GITHUB_MODELS_TOKEN).
+          GITHUB_MODELS_TOKEN: ${{ secrets.GITHUB_MODELS_TOKEN }}
           REWE_CERT: ${{ steps.rewe.outputs.cert }}
           REWE_KEY: ${{ steps.rewe.outputs.key }}
           ONLY_PLZ: ${{ inputs.plz }}
@@ -149,6 +153,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GITHUB_MODELS_TOKEN: ${{ secrets.GITHUB_MODELS_TOKEN }}
           REWE_CERT: ${{ steps.rewe.outputs.cert }}
           REWE_KEY: ${{ steps.rewe.outputs.key }}
         run: |
