@@ -390,6 +390,64 @@ fn lidl_prospekt_parses_llm_response_and_injects_dates() {
     }
 }
 
+// Region-Mapping: Die Absatzregion (AR) der Filiale wählt die Prospektvariante.
+// Codes/AR-Werte sind reale Live-Daten vom 2026-07-18 (KW 29).
+#[test]
+fn lidl_prospekt_week_slugs_groups_variants_of_chosen_week() {
+    use scrapers::lidl_prospekt::week_slugs;
+    let slugs = vec![
+        "aktionsprospekt-13-07-2026-18-07-2026-ab6a35".to_string(),
+        "aktionsprospekt-13-07-2026-18-07-2026-4ff4e5".to_string(),
+        "aktionsprospekt-20-07-2026-25-07-2026-00d2c5".to_string(),
+    ];
+    // Datum in Woche 1 -> beide Woche-1-Varianten, nicht die aus Woche 2.
+    let week = week_slugs(&slugs, "2026-07-15");
+    assert_eq!(week.len(), 2, "{week:?}");
+    assert!(week.iter().all(|s| s.contains("13-07-2026-18-07-2026")));
+    // Datum in Woche 2 -> nur deren Variante.
+    assert_eq!(week_slugs(&slugs, "2026-07-22"), vec![
+        "aktionsprospekt-20-07-2026-25-07-2026-00d2c5".to_string()
+    ]);
+}
+
+#[test]
+fn lidl_prospekt_picks_region_variant_by_ar() {
+    use scrapers::lidl_prospekt::pick_region_variant;
+    // Gekürzter realer Ausschnitt der KW-29-Varianten (Slug-Suffix -> AR-Codes).
+    let variants = vec![
+        ("4ff4e5".to_string(), vec!["0".to_string()]), // Platzhalter
+        ("ab6a35".to_string(), vec!["19", "20", "32", "35"].into_iter().map(String::from).collect()),
+        ("3b32c8".to_string(), vec!["12", "16", "2"].into_iter().map(String::from).collect()),
+    ];
+    // AR 20 (Dresden/01219) -> Variante ab6a35.
+    assert_eq!(pick_region_variant(&variants, Some("20")), Some("ab6a35"));
+    // AR 12 (Stuttgart) -> Variante 3b32c8.
+    assert_eq!(pick_region_variant(&variants, Some("12")), Some("3b32c8"));
+    // Unbekannte AR -> Fallback: erste Nicht-Platzhaltervariante (nicht 4ff4e5).
+    assert_eq!(pick_region_variant(&variants, Some("999")), Some("ab6a35"));
+    // Keine AR (Store-Finder-Fehler) -> ebenfalls erste Nicht-Platzhaltervariante.
+    assert_eq!(pick_region_variant(&variants, None), Some("ab6a35"));
+}
+
+#[test]
+fn store_finder_parses_lidl_region_code() {
+    use scrapers::store_finder::parse_region_code;
+    // AR als Zahl (so liefert Bing SDS es real).
+    let num: serde_json::Value =
+        serde_json::json!({"d": {"results": [{"EntityID": "1988", "AR": 20}]}});
+    assert_eq!(parse_region_code(&num).as_deref(), Some("20"));
+    // AR als String -> ebenfalls normalisiert.
+    let s: serde_json::Value =
+        serde_json::json!({"d": {"results": [{"EntityID": "1", "AR": "446"}]}});
+    assert_eq!(parse_region_code(&s).as_deref(), Some("446"));
+    // Keine Filiale / kein AR-Feld -> None.
+    let empty: serde_json::Value = serde_json::json!({"d": {"results": []}});
+    assert_eq!(parse_region_code(&empty), None);
+    let no_ar: serde_json::Value =
+        serde_json::json!({"d": {"results": [{"EntityID": "1"}]}});
+    assert_eq!(parse_region_code(&no_ar), None);
+}
+
 // ---------------------------------------------------------------- Store-Finder
 // Offline-Fixtures der Filialfinder (Lidl: Bing SDS, ALDI: Uberall) und des
 // Nominatim-Geocoders, gekürzte Live-Antworten vom 2026-07-17 (PLZ 01219).

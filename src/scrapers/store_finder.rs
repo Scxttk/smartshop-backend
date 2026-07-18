@@ -121,6 +121,45 @@ pub fn parse_virtualearth(raw: &serde_json::Value) -> Result<Option<Market>> {
     ))
 }
 
+/// Absatzregion (AR) der nächsten Lidl-Filiale einer PLZ — der numerische
+/// Regionsschlüssel, unter dem der Wochenprospekt regionalisiert wird. None,
+/// wenn keine Filiale im Umkreis liegt oder das Feld fehlt.
+///
+/// Das Feld `AR` im Bing-SDS-Datensatz (`Filialdaten-SEC`) entspricht 1:1 dem
+/// `regions[].code` im Flyer-JSON von endpoints.leaflets.schwarz: jede AR liegt
+/// in genau einer der ~14 Wochenvarianten. Damit wird aus der PLZ die korrekte
+/// Prospektvariante bestimmt (siehe lidl_prospekt::current_slug).
+pub fn lidl_region_code(plz: &str) -> Result<Option<String>> {
+    let (lat, lon) = geocode_plz(plz)?;
+    let url = format!(
+        "https://spatial.virtualearth.net/REST/v1/data/{LIDL_DATASET}/Filialdaten-SEC/Filialdaten-SEC\
+         ?key={LIDL_KEY}&$filter=Adresstyp%20Eq%201&spatialFilter=nearby({lat},{lon},{CUTOFF_KM})\
+         &$select=EntityID,AR&$format=json&$top=1"
+    );
+    util::polite_pause(&url);
+    let raw: serde_json::Value = util::blocking_client()?
+        .get(&url)
+        .send()
+        .with_context(|| util::ctx("Lidl", "Regions-Lookup", &url))?
+        .error_for_status()
+        .with_context(|| util::ctx("Lidl", "Regions-Lookup (HTTP-Status)", &url))?
+        .json()
+        .with_context(|| util::ctx("Lidl", "Regions-Lookup JSON parsen", &url))?;
+    Ok(parse_region_code(&raw))
+}
+
+/// AR-Feld der ersten Filiale aus einer Bing-SDS-Antwort als String
+/// ("20"); None bei leerer Liste oder fehlendem Feld. AR kann als Zahl oder
+/// String ausgeliefert werden — beides wird normalisiert.
+pub fn parse_region_code(raw: &serde_json::Value) -> Option<String> {
+    let store = raw.pointer("/d/results")?.as_array()?.first()?;
+    match store.get("AR")? {
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::String(s) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    }
+}
+
 // ---------------------------------------------------------------- ALDI (Uberall)
 
 pub fn aldi_nord_branch(plz: &str) -> Result<Option<Market>> {

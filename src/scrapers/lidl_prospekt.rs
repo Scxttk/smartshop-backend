@@ -22,11 +22,13 @@ use crate::scrapers::{store_finder, util};
 //      Flyer-JSON (offerStartDate/offerEndDate) — nie vom LLM (halluziniert
 //      sonst das Jahr).
 //
-// TODO(region): Das Overview listet ~14 Regionsvarianten pro Woche
-// (Slug-Suffix = Region). Ein exaktes PLZ->Region-Mapping ist nicht bekannt;
-// Lidl-Angebote gelten praktisch bundesweit, darum wird pragmatisch die erste
-// Aktionsprospekt-Variante der laufenden Woche genommen. Die PLZ dient nur der
-// Filial-Präsenzprüfung über den Store-Finder.
+// Region: Das Overview listet ~14 Regionsvarianten pro Woche (Slug-Suffix =
+// Region-Hash). Die passende Variante wird über die Absatzregion (AR) der
+// PLZ-Filiale bestimmt: store_finder::lidl_region_code liefert das AR-Feld aus
+// dem Bing-Store-Finder, das 1:1 dem `regions[].code` im Flyer-JSON entspricht
+// (jede AR liegt in genau einer Variante — verifiziert für 01219/München/
+// Hamburg/Köln/Berlin/Frankfurt/Stuttgart, 2026-07-18). Fallback ohne
+// Store-Finder-Treffer: erste Nicht-Platzhaltervariante der Woche.
 
 const OVERVIEW_URL: &str =
     "https://www.lidl.com/flyer/esi-overview/overview?client_locale=lidl%2Fde-DE&mode=iframe";
@@ -57,14 +59,27 @@ pub fn fetch_offers(market: &Market, zip: &str, max_pages: usize) -> Result<Vec<
     let token = std::env::var(TOKEN_ENV)
         .with_context(|| format!("{TOKEN_ENV} nicht gesetzt (Token aus `gh auth token`)"))?;
 
+    // Absatzregion (AR) der Filiale VOR dem async-Runtime bestimmen: der
+    // Store-Finder nutzt reqwest::blocking (eigener Runtime) und darf nicht aus
+    // einem async-Kontext laufen. Finder-Fehler sind kein Abbruch — der
+    // Fallback in resolve_flyer greift.
+    let region = match store_finder::lidl_region_code(zip) {
+        Ok(ar) => ar,
+        Err(e) => {
+            eprintln!("[Lidl-Prospekt] Regions-Lookup fehlgeschlagen ({e:#}) — Fallback-Variante.");
+            None
+        }
+    };
+
     block_on(async {
         let client = util::async_client()?;
 
-        // 1. Slug der laufenden Woche.
-        let slug = current_slug(&client, zip).await?;
-
-        // 2. Flyer-JSON.
-        let flyer = fetch_flyer(&client, &slug).await?;
+        // 1./2. Passende Wochenvariante (Region der PLZ) + Flyer-JSON.
+        let (slug, flyer) = resolve_flyer(&client, region.as_deref()).await?;
+        eprintln!(
+            "[Lidl-Prospekt] Variante {slug} (Region-Codes {:?})",
+            flyer.region_codes()
+        );
 
         // 3. Vorfilter.
         let pages = offer_pages(&flyer.pages, max_pages);
@@ -103,7 +118,43 @@ pub fn fetch_offers(market: &Market, zip: &str, max_pages: usize) -> Result<Vec<
 
 // --------------------------------------------------------------- Slug/Overview
 
-async fn current_slug(client: &reqwest::Client, _zip: &str) -> Result<String> {
+/// Wochenvariante zur PLZ auflösen: Overview -> Slugs der laufenden Woche ->
+/// Absatzregion (AR) der Filiale -> passende Variante samt Flyer-JSON.
+///
+/// Die AR-Zuordnung (store_finder::lidl_region_code) trifft genau eine Variante
+/// (deren `regions[].code` die AR enthält). Ist der Store-Finder nicht
+/// erreichbar oder passt keine Variante, greift der Fallback aus
+/// `pick_region_variant` (erste Nicht-Platzhaltervariante der Woche).
+async fn resolve_flyer(client: &reqwest::Client, target: Option<&str>) -> Result<(String, Flyer)> {
+    let html = fetch_overview(client).await?;
+    let slugs = parse_overview_slugs(&html);
+    let week = week_slugs(&slugs, today_berlin());
+    if week.is_empty() {
+        bail!("[Lidl-Prospekt] Kein passender Aktionsprospekt-Slug ({} im Overview)", slugs.len());
+    }
+
+    // Alle Wochenvarianten laden (kleine JSONs, kein Vision) und passende wählen.
+    let mut loaded: Vec<(String, Flyer)> = Vec::with_capacity(week.len());
+    for slug in &week {
+        loaded.push((slug.clone(), fetch_flyer(client, slug).await?));
+    }
+    let index: Vec<(String, Vec<String>)> = loaded
+        .iter()
+        .map(|(s, f)| (s.clone(), f.region_codes().into_iter().map(String::from).collect()))
+        .collect();
+    let chosen = pick_region_variant(&index, target)
+        .expect("Woche nicht leer")
+        .to_string();
+    if let Some(ar) = target
+        && !index.iter().any(|(s, codes)| *s == chosen && codes.iter().any(|c| c == ar))
+    {
+        eprintln!("[Lidl-Prospekt] Keine Variante mit Region-Code {ar} — Fallback {chosen}.");
+    }
+    let flyer = loaded.into_iter().find(|(s, _)| *s == chosen).map(|(_, f)| f).expect("gewählt geladen");
+    Ok((chosen, flyer))
+}
+
+async fn fetch_overview(client: &reqwest::Client) -> Result<String> {
     util::polite_pause(OVERVIEW_URL);
     let resp = client
         .get(OVERVIEW_URL)
@@ -113,10 +164,43 @@ async fn current_slug(client: &reqwest::Client, _zip: &str) -> Result<String> {
     if !resp.status().is_success() {
         bail!("[Lidl-Prospekt] Overview lieferte HTTP {}", resp.status());
     }
-    let html = resp.text().await.unwrap_or_default();
-    let slugs = parse_overview_slugs(&html);
-    pick_slug(&slugs, today_berlin())
-        .with_context(|| format!("Kein passender Aktionsprospekt-Slug ({} gefunden)", slugs.len()))
+    Ok(resp.text().await.unwrap_or_default())
+}
+
+/// Alle Varianten-Slugs derselben Woche, die `pick_slug` wählen würde
+/// (laufende bzw. nächste kommende). Grundlage der Regionsauswahl.
+pub fn week_slugs(slugs: &[String], today: &str) -> Vec<String> {
+    let Some(chosen) = pick_slug(slugs, today) else {
+        return Vec::new();
+    };
+    match slug_range(&chosen) {
+        Some(range) => slugs
+            .iter()
+            .filter(|s| slug_range(s).as_ref() == Some(&range))
+            .cloned()
+            .collect(),
+        None => vec![chosen],
+    }
+}
+
+/// Aus geladenen Wochenvarianten `(slug, region_codes)` die zur Absatzregion
+/// `ar` passende wählen. Reihenfolge: exakter Region-Treffer > erste
+/// Nicht-Platzhaltervariante (Codes != nur "0") > erste überhaupt. None nur
+/// bei leerer Eingabe.
+pub fn pick_region_variant<'a>(
+    variants: &'a [(String, Vec<String>)],
+    ar: Option<&str>,
+) -> Option<&'a str> {
+    if let Some(ar) = ar
+        && let Some((slug, _)) = variants.iter().find(|(_, codes)| codes.iter().any(|c| c == ar))
+    {
+        return Some(slug);
+    }
+    variants
+        .iter()
+        .find(|(_, codes)| !codes.iter().all(|c| c == "0"))
+        .or_else(|| variants.first())
+        .map(|(slug, _)| slug.as_str())
 }
 
 /// Alle `aktionsprospekt-DD-MM-YYYY-DD-MM-YYYY-<region>`-Slugs aus dem
@@ -187,7 +271,25 @@ pub struct Flyer {
     #[serde(default, rename = "offerEndDate")]
     pub offer_end_date: Option<String>,
     #[serde(default)]
+    pub regions: Vec<FlyerRegion>,
+    #[serde(default)]
     pub pages: Vec<Page>,
+}
+
+/// Regionsschlüssel einer Prospektvariante. Der `code` entspricht dem AR-Feld
+/// des Lidl-Store-Finders (store_finder::lidl_region_code); "0" markiert die
+/// nationale Platzhaltervariante ohne regionale Angebote.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FlyerRegion {
+    #[serde(default)]
+    pub code: String,
+}
+
+impl Flyer {
+    /// Region-Codes dieser Variante.
+    pub fn region_codes(&self) -> Vec<&str> {
+        self.regions.iter().map(|r| r.code.as_str()).collect()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

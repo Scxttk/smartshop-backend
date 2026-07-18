@@ -56,6 +56,38 @@ impl Store {
     }
 }
 
+/// Angebotsquelle für Lidl. Standard ist der marktguru-Scraper (`lidl.rs`);
+/// mit `LIDL_SOURCE=prospekt` (auch `flyer`/`llm`) schaltet der Lauf auf die
+/// LLM-Prospekt-Pipeline (`lidl_prospekt.rs`) um.
+///
+/// Bewusst ein Runtime-Schalter statt eines Cargo-Features:
+///   * Derselbe Build kann beide Quellen fahren — nötig für den direkten
+///     Vergleichslauf (PLZ 01219, marktguru vs. Prospekt) und für ein
+///     späteres Nightly-A/B, ohne zwei Binaries zu pflegen.
+///   * Der teure Vision-Pfad (GitHub-Models-Token, Rate-Limit, Kosten) läuft
+///     nur bei explizitem Opt-in; ohne die Env bleibt alles unverändert.
+///   * Der Schalter greift an genau einer Stelle (`scrape_store`) und wirkt
+///     dadurch automatisch in `fetch`, `fetch_all` und im Sync-Fetcher.
+///
+/// Ein Cargo-Feature würde dagegen die Quelle zur Compile-Zeit festnageln und
+/// A/B unmöglich machen.
+fn lidl_use_prospekt() -> bool {
+    matches!(
+        std::env::var("LIDL_SOURCE").ok().as_deref(),
+        Some("prospekt") | Some("flyer") | Some("llm")
+    )
+}
+
+/// Obergrenze an Vision-Calls (= gefilterten Angebotsseiten) pro Prospekt-Lauf,
+/// überschreibbar via `LIDL_PROSPEKT_MAX_PAGES`. `lidl_prospekt::fetch_offers`
+/// kappt zusätzlich auf sein internes Hard-Limit.
+fn lidl_prospekt_max_pages() -> usize {
+    std::env::var("LIDL_PROSPEKT_MAX_PAGES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(12)
+}
+
 /// None: die Kette hat laut Store-Finder keine Filiale im Umkreis der PLZ
 /// (nur bei Lidl/ALDI möglich — die übrigen Finder scheitern dann mit Err).
 pub fn scrape_store(
@@ -71,10 +103,19 @@ pub fn scrape_store(
         Store::Kaufland => scrapers::kaufland::find_market(zip)?,
         Store::Netto => scrapers::netto::find_market(zip)?,
         Store::Edeka => scrapers::edeka::find_market(zip)?,
-        Store::Lidl => match scrapers::lidl::find_market(zip)? {
-            Some(m) => m,
-            None => return Ok(None),
-        },
+        Store::Lidl => {
+            // Präsenzprüfung ist in beiden Quellen identisch (Store-Finder);
+            // die passende wählen wir trotzdem konsistent zur Angebotsquelle.
+            let found = if lidl_use_prospekt() {
+                scrapers::lidl_prospekt::find_market(zip)?
+            } else {
+                scrapers::lidl::find_market(zip)?
+            };
+            match found {
+                Some(m) => m,
+                None => return Ok(None),
+            }
+        }
         Store::AldiNord => match scrapers::aldi_nord::find_market(zip)? {
             Some(m) => m,
             None => return Ok(None),
@@ -90,7 +131,13 @@ pub fn scrape_store(
         Store::Rewe => scrapers::rewe::fetch_offers(&market, cert, key)?,
         Store::Penny => scrapers::penny::fetch_offers(&market)?,
         Store::Kaufland => scrapers::kaufland::fetch_offers(&market)?,
-        Store::Lidl => scrapers::lidl::fetch_offers(&market, zip)?,
+        Store::Lidl => {
+            if lidl_use_prospekt() {
+                scrapers::lidl_prospekt::fetch_offers(&market, zip, lidl_prospekt_max_pages())?
+            } else {
+                scrapers::lidl::fetch_offers(&market, zip)?
+            }
+        }
         Store::Netto => scrapers::netto::fetch_offers(&market)?,
         Store::AldiNord => scrapers::aldi_nord::fetch_offers(&market)?,
         Store::AldiSued => scrapers::aldi_sued::fetch_offers(&market)?,
