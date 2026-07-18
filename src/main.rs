@@ -162,6 +162,10 @@ enum Command {
         #[arg(long, default_value_t = 10)]
         max_regions: usize,
 
+        /// Nur diese eine PLZ syncen (wird bei Bedarf registriert)
+        #[arg(long, value_name = "PLZ")]
+        only: Option<String>,
+
         /// Pfad zum Rewe TLS-Zertifikat (PEM)
         #[arg(long, default_value = "cert.pem")]
         cert: String,
@@ -298,8 +302,8 @@ fn main() -> Result<()> {
             };
             smartshop::push::run(&opts, None)
         }
-        Command::SyncRegions { max_regions, cert, key, dry_run, db } => {
-            let opts = smartshop::sync::SyncOptions { db_path: db, dry_run, max_regions };
+        Command::SyncRegions { max_regions, only, cert, key, dry_run, db } => {
+            let opts = smartshop::sync::SyncOptions { db_path: db, dry_run, max_regions, only };
             let fetcher = |plz: &str| {
                 Store::ALL
                     .iter()

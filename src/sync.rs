@@ -21,6 +21,9 @@ pub struct SyncOptions {
     /// Höchstens so viele Regionen pro Lauf syncen; weitere werden geloggt
     /// und übersprungen.
     pub max_regions: usize,
+    /// Nur diese eine PLZ syncen (On-Demand-Trigger); wird bei Bedarf in
+    /// `regions` registriert. None = alle aktiven Regionen.
+    pub only: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,7 +56,9 @@ pub fn fetch_regions(cfg: &PushConfig) -> Result<Vec<Region>> {
         .query(&[
             ("select", "plz"),
             ("active", "eq.true"),
-            ("order", "requested_at"),
+            // Unsyncte Regionen zuerst (dort wartet gerade jemand in der App),
+            // danach die ältesten — so bekommt eine neue PLZ Daten in Minuten.
+            ("order", "last_synced.asc.nullsfirst,requested_at.asc"),
         ])
         .send()
         .with_context(|| format!("Supabase nicht erreichbar ({})", cfg.base_url))?;
@@ -195,13 +200,36 @@ fn sync_region(opts: &SyncOptions, cfg: &PushConfig, fetcher: &Fetcher, plz: &st
     )
 }
 
+/// Eine PLZ in `regions` registrieren, falls sie noch fehlt (409 = schon da).
+fn register_region(cfg: &PushConfig, plz: &str) -> Result<()> {
+    let client = reqwest::blocking::Client::new();
+    let resp = auth(cfg, client.post(format!("{}/rest/v1/regions", cfg.base_url)))
+        .json(&serde_json::json!({ "plz": plz }))
+        .send()
+        .with_context(|| format!("Supabase nicht erreichbar ({})", cfg.base_url))?;
+    if resp.status().as_u16() == 409 {
+        return Ok(());
+    }
+    check_response(&format!("Registrieren der Region {plz}"), resp)
+}
+
 /// Alle aktiven Regionen aus Supabase syncen. Fehler einzelner Regionen
 /// brechen den Lauf nicht ab; Exit-Fehler nur, wenn ALLE Regionen scheitern.
+/// Mit `only` wird genau eine PLZ gesynct (und vorher registriert).
 pub fn run(opts: &SyncOptions, cfg: Option<&PushConfig>, fetcher: &Fetcher) -> Result<()> {
     let cfg = match cfg {
         Some(c) => c,
         None => &push::config_from_env()?,
     };
+
+    if let Some(plz) = &opts.only {
+        if !opts.dry_run {
+            register_region(cfg, plz)?;
+        }
+        println!("On-Demand-Sync: nur Region {plz}");
+        return sync_region(opts, cfg, fetcher, plz)
+            .with_context(|| format!("Region {plz} fehlgeschlagen"));
+    }
 
     let regions = fetch_regions(cfg)?;
     if regions.is_empty() {
