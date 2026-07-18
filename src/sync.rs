@@ -67,6 +67,19 @@ pub fn fetch_regions(cfg: &PushConfig) -> Result<Vec<Region>> {
     Ok(regions)
 }
 
+/// Markt-Zeile einer Kette für eine Region aus `public.markets` löschen —
+/// der Store-Finder hat definitiv "keine Filiale im Umkreis" gemeldet.
+/// Finder-Fehler kommen hier nie an (sie fallen in store_finder::resolve auf
+/// den nationalen Platzhalter zurück), die Zeile bleibt dann stehen.
+fn delete_market(cfg: &PushConfig, chain: &str, plz: &str) -> Result<()> {
+    let client = reqwest::blocking::Client::new();
+    let resp = auth(cfg, client.delete(format!("{}/rest/v1/markets", cfg.base_url)))
+        .query(&[("chain", format!("eq.{chain}")), ("plz", format!("eq.{plz}"))])
+        .send()
+        .with_context(|| format!("Supabase nicht erreichbar ({})", cfg.base_url))?;
+    check_response(&format!("Löschen des Markts {chain} (PLZ {plz})"), resp)
+}
+
 /// Gefundene Märkte einer Region nach `public.markets` upserten.
 fn upsert_markets(cfg: &PushConfig, rows: &[serde_json::Value]) -> Result<()> {
     let client = reqwest::blocking::Client::new();
@@ -96,13 +109,16 @@ fn sync_region(opts: &SyncOptions, cfg: &PushConfig, fetcher: &Fetcher, plz: &st
     }
     let mut rows: Vec<Row> = Vec::new();
     let mut market_rows: Vec<serde_json::Value> = Vec::new();
+    let mut gone_chains: Vec<String> = Vec::new();
 
     for (chain, result) in fetcher(plz) {
         match result {
             Ok(None) => {
-                // Kette hat keine Filiale im Umkreis — nicht registrieren,
-                // zählt weder als Erfolg noch als Fehler.
+                // Kette hat definitiv keine Filiale im Umkreis — nicht
+                // registrieren (zählt weder als Erfolg noch als Fehler) und
+                // eine evtl. vorhandene Markt-Zeile aus Supabase entfernen.
                 println!("[{plz}] {chain}: keine Filiale in der Nähe — übersprungen.");
+                gone_chains.push(chain);
             }
             Ok(Some((market, offers))) => {
                 println!("[{plz}] {chain}: {} Angebote gefunden.", offers.len());
@@ -151,9 +167,15 @@ fn sync_region(opts: &SyncOptions, cfg: &PushConfig, fetcher: &Fetcher, plz: &st
 
     if opts.dry_run {
         println!("[{plz}] Dry-Run — Märkte werden nicht hochgeladen.");
-    } else if !market_rows.is_empty() {
-        upsert_markets(cfg, &market_rows)?;
-        println!("[{plz}] {} Märkte nach Supabase gemeldet.", market_rows.len());
+    } else {
+        if !market_rows.is_empty() {
+            upsert_markets(cfg, &market_rows)?;
+            println!("[{plz}] {} Märkte nach Supabase gemeldet.", market_rows.len());
+        }
+        for chain in &gone_chains {
+            delete_market(cfg, chain, plz)?;
+            println!("[{plz}] {chain}: Markt-Zeile entfernt (keine Filiale mehr im Umkreis).");
+        }
     }
 
     push::run(

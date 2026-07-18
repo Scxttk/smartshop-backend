@@ -333,4 +333,36 @@ fn chain_without_nearby_branch_is_skipped_not_failed() {
     assert_eq!(rows[0]["chain"], "REWE");
     // Region gilt trotzdem als erfolgreich: Offers-Push lief
     assert!(reqs.iter().any(|r| r.method == "POST" && r.target.starts_with("/rest/v1/offers")));
+
+    // Definitives "keine Filiale" räumt die evtl. vorhandene Markt-Zeile ab.
+    let dels: Vec<&Req> = reqs
+        .iter()
+        .filter(|r| r.method == "DELETE" && r.target.starts_with("/rest/v1/markets"))
+        .collect();
+    assert_eq!(dels.len(), 1, "Requests: {reqs:#?}");
+    assert!(dels[0].target.contains("chain=eq.Lidl"), "{}", dels[0].target);
+    assert!(dels[0].target.contains("plz=eq.01219"), "{}", dels[0].target);
+}
+
+// Finder-Fehler dürfen NICHT löschen — nur ein definitives Ok(None). Fehler
+// erreichen sync als Err (bzw. via Fallback als Ok(Some)) und lassen die
+// bestehende Markt-Zeile stehen.
+#[test]
+fn chain_error_keeps_existing_market_row() {
+    let (base_url, log) = spawn_mock(r#"[{"plz":"01219"}]"#);
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let inner = ok_fetcher(calls);
+    let fetcher = |plz: &str| -> FetchResult {
+        let mut result = inner(plz);
+        result.push(("Lidl".to_string(), Err(anyhow!("Finder kaputt"))));
+        result
+    };
+    let db_path = temp_db("chain-err");
+    sync::run(&opts(&db_path), Some(&cfg(&base_url)), &fetcher).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    assert!(
+        !reqs.iter().any(|r| r.method == "DELETE" && r.target.starts_with("/rest/v1/markets")),
+        "Fehler darf keine Markt-Zeile löschen: {reqs:#?}"
+    );
 }
