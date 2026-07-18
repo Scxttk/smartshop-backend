@@ -90,7 +90,7 @@ pub fn scrape_store(
         Store::Rewe => scrapers::rewe::fetch_offers(&market, cert, key)?,
         Store::Penny => scrapers::penny::fetch_offers(&market)?,
         Store::Kaufland => scrapers::kaufland::fetch_offers(&market)?,
-        Store::Lidl => scrapers::lidl::fetch_offers(&market)?,
+        Store::Lidl => scrapers::lidl::fetch_offers(&market, zip)?,
         Store::Netto => scrapers::netto::fetch_offers(&market)?,
         Store::AldiNord => scrapers::aldi_nord::fetch_offers(&market)?,
         Store::AldiSued => scrapers::aldi_sued::fetch_offers(&market)?,
