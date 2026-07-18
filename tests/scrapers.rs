@@ -335,6 +335,18 @@ fn store_finder_virtualearth_hit_yields_lidl_branch_with_geo() {
     assert_eq!(market.lon, Some(13.74984));
 }
 
+// Regression: leerer ShownStoreName ergab den Filialnamen "Lidl " — jetzt
+// fällt der Name auf die Stadt (Locality) zurück.
+#[test]
+fn store_finder_virtualearth_empty_store_name_falls_back_to_city() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/store_finder/virtualearth_hit_no_name.json"))
+            .unwrap();
+    let market = scrapers::store_finder::parse_virtualearth(&raw).unwrap().unwrap();
+    assert_eq!(market.id, "LIDL_5745");
+    assert_eq!(market.name, "Lidl Dresden");
+}
+
 #[test]
 fn store_finder_virtualearth_empty_means_no_branch() {
     let raw: serde_json::Value =

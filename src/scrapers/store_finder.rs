@@ -98,10 +98,20 @@ pub fn parse_virtualearth(raw: &serde_json::Value) -> Result<Option<Market>> {
         return Ok(None);
     };
     let id = store.get("EntityID").and_then(|v| v.as_str()).context("EntityID fehlt")?;
+    // ShownStoreName ist oft leer — dann die Stadt (Locality), damit nicht
+    // "Lidl " als Filialname in der App landet.
     let name = store
         .get("ShownStoreName")
         .and_then(|v| v.as_str())
-        .or_else(|| store.get("Locality").and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            store
+                .get("Locality")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
         .unwrap_or("Filiale");
     Ok(Some(
         Market::new(format!("LIDL_{id}"), format!("Lidl {name}")).with_geo(
