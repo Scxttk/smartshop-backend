@@ -1,0 +1,12 @@
+```json
+[
+  {"name": "Nektarinen", "price": 1.79, "unit": "1 kg"},
+  {"name": "Nektarinen", "price": 1.49, "unit": "1 kg"},
+  {"name": "Tomaten Mix", "price": 1.99, "unit": "500 g"},
+  {"name": "Bananen, lose", "price": 0.99, "unit": "kg"},
+  {"name": "Salat-Mix", "price": 0.99, "unit": "125 g"},
+  {"name": "Frischer Zuckermais", "price": 1.49, "unit": "2 Stück"},
+  {"name": "Deko-Werbeschild ohne Preis", "price": null},
+  {"name": "Silvercrest Pizzaofen", "price": 199.00, "unit": "Stück"}
+]
+```

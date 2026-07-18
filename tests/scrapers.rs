@@ -303,6 +303,93 @@ fn lidl_marktguru_fixture_parses_offers_and_skips_foreign_advertisers() {
     }
 }
 
+// ------------------------------------------------------ Lidl-Prospekt (LLM)
+// Offline-Tests der Prospekt-Pipeline: Slug-Auswahl, Flyer-Parsing,
+// Seiten-Vorfilter, tolerantes LLM-Parsing und Datumsinjektion. Fixtures sind
+// gekürzte Live-Antworten vom 2026-07-18 (KW 29, Aktionsprospekt 13.–18.07.2026).
+
+#[test]
+fn lidl_prospekt_parses_overview_and_picks_current_slug() {
+    use scrapers::lidl_prospekt::{parse_overview_slugs, pick_slug};
+    let html = r#"<a href="/flyer/aktionsprospekt-13-07-2026-18-07-2026-4ff4e5">A</a>
+        <a href="/flyer/aktionsprospekt-13-07-2026-18-07-2026-1a3245">B</a>
+        <a href="/flyer/aktionsprospekt-20-07-2026-25-07-2026-00d2c5">C</a>
+        <a href="/flyer/xmas-flyer">skip</a>"#;
+    let slugs = parse_overview_slugs(html);
+    assert_eq!(slugs.len(), 3, "nur vollständige Datums-Slugs, dedupliziert: {slugs:?}");
+
+    // Datum in der ersten Woche -> erster Slug dieser Woche.
+    assert_eq!(
+        pick_slug(&slugs, "2026-07-15").as_deref(),
+        Some("aktionsprospekt-13-07-2026-18-07-2026-4ff4e5")
+    );
+    // Datum in der zweiten Woche -> deren Slug.
+    assert_eq!(
+        pick_slug(&slugs, "2026-07-22").as_deref(),
+        Some("aktionsprospekt-20-07-2026-25-07-2026-00d2c5")
+    );
+    // Datum vor allen Prospekten -> nächster kommender (Woche 1).
+    assert_eq!(
+        pick_slug(&slugs, "2026-07-01").as_deref(),
+        Some("aktionsprospekt-13-07-2026-18-07-2026-4ff4e5")
+    );
+}
+
+#[test]
+fn lidl_prospekt_parses_flyer_and_filters_offer_pages() {
+    use scrapers::lidl_prospekt::{offer_pages, parse_flyer};
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/lidl/prospekt_flyer.json")).unwrap();
+    let flyer = parse_flyer(&raw).unwrap();
+
+    // Gültigkeit kommt aus dem Flyer-JSON (Jahr 2026!), nicht vom LLM.
+    assert_eq!(flyer.offer_start_date.as_deref(), Some("2026-07-13"));
+    assert_eq!(flyer.offer_end_date.as_deref(), Some("2026-07-18"));
+    assert_eq!(flyer.pages.len(), 5);
+
+    // Vorfilter: Titelseite, Werbeseite und Onlineshop-Seite fallen raus,
+    // die beiden echten Angebotsseiten (Gemüse, Backshop) bleiben.
+    let pages = offer_pages(&flyer.pages, 10);
+    let alts: Vec<&str> = pages.iter().map(|(_, p)| p.alt_text.as_str()).collect();
+    assert_eq!(pages.len(), 2, "erwartet 2 Angebotsseiten, war {alts:?}");
+    assert!(alts.iter().all(|a| a.contains("Angebot") || a.contains("Backshop")));
+    assert!(!alts.iter().any(|a| a.contains("Werbeseite") || a.contains("Onlineshop")));
+}
+
+#[test]
+fn lidl_prospekt_parses_llm_response_and_injects_dates() {
+    use scrapers::lidl_prospekt::{build_offer, parse_llm_response};
+    let content = include_str!("fixtures/lidl/prospekt_llm_response.txt");
+
+    // Markdown-Fences werden gestrippt, das Array sauber geparst.
+    let raws = parse_llm_response(content);
+    assert_eq!(raws.len(), 8);
+
+    // Datumsinjektion aus dem Flyer-JSON, nicht vom LLM.
+    let offers: Vec<_> = raws
+        .iter()
+        .filter_map(|r| build_offer(r, "LIDL_DE", Some("2026-07-13"), Some("2026-07-18"), 2))
+        .collect();
+
+    // Preisloses Angebot (price: null) und unplausibler 199-€-Non-Food-Artikel
+    // (> 100 €) fallen weg -> 6 gültige Angebote.
+    assert_eq!(offers.len(), 6, "Preisfilter 0,10–100 € greift");
+
+    let nektarinen = &offers[0];
+    assert_eq!(nektarinen.title, "Nektarinen");
+    assert_eq!(nektarinen.price, Some(1.79));
+    assert_eq!(nektarinen.subtitle.as_deref(), Some("1 kg"));
+    assert_eq!(nektarinen.valid_from.as_deref(), Some("2026-07-13"));
+    assert_eq!(nektarinen.valid_until.as_deref(), Some("2026-07-18"));
+    assert_eq!(nektarinen.flyer_page, Some(2));
+    assert_eq!(nektarinen.market_id, "LIDL_DE");
+
+    for o in &offers {
+        let p = o.price.unwrap();
+        assert!((0.10..=100.0).contains(&p), "Preis {p} außerhalb Plausibilität bei {}", o.title);
+    }
+}
+
 // ---------------------------------------------------------------- Store-Finder
 // Offline-Fixtures der Filialfinder (Lidl: Bing SDS, ALDI: Uberall) und des
 // Nominatim-Geocoders, gekürzte Live-Antworten vom 2026-07-17 (PLZ 01219).

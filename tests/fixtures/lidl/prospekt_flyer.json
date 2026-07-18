@@ -1,0 +1,38 @@
+{
+  "flyer": {
+    "offerStartDate": "2026-07-13",
+    "offerEndDate": "2026-07-18",
+    "pages": [
+      {
+        "number": 1,
+        "image": "https://imgproxy.leaflets.schwarz/FbCrOn5E74zdnO5rzmBi8hESn6JD4fovL9hJP-vZs3o/rs:fit:1200:1200:1/g:no/czM6Ly9sZWFmbGV0cy9pbWFnZXMvMDE5ZjM3ODktZWJkNC03ZmJmLTlhZTQtM2QzNzIwMGEzYjEzL3BhZ2UtMDFfZjEyMTY5ODEyMzkyYTFjMzRlNDIyMjAxNGIzMDcxZDYucG5n.jpg",
+        "keyWords": "Ucht  Alesto Walnusskerne -34% -33% Cashewkerne Mandeln -50% Silvercrest Temperatur- Pizzaofen Typ „Spe Stück Livarno Ampelschirm  Verglichen   200 G Packungen „Naturbelassene Walnusskerne“  Tiefpreis",
+        "altText": "Prospekt-Titelseite von Lidl mit Angeboten für Alesto Walnusskerne, Silvercrest Pizzaofen, Livarno Ampelschirm und Parkside Hochdruckreiniger."
+      },
+      {
+        "number": 2,
+        "image": "https://imgproxy.leaflets.schwarz/u3Lz_7sqFB_Pq7w5boGClNlcAU0A3V__uM-5yhhCct8/rs:fit:1200:1200:1/g:no/czM6Ly9sZWFmbGV0cy9pbWFnZXMvMDE5ZjM3ODktZWJkNC03ZmJmLTlhZTQtM2QzNzIwMGEzYjEzL3BhZ2UtMDJfMGU4NWJiNzk4MTVkODAyZmU2YjFlZjNjODhlNjE2MjUucG5n.jpg",
+        "keyWords": "Großer Frische-Sieger Winziger Preis Lidl Dienstleistung & Sieger Kategorie Discount Fruitnet Media International Düsseldorf Bewusst Ernähren Wigald Boning Honigmelone Ursprung Spanien Klasse Kirschen",
+        "altText": "Werbeseite für frisches Obst und Gemüse von Lidl, darunter Honigmelonen, Kirschen und Johannisbeeren, mit Auszeichnung als Frische-Sieger."
+      },
+      {
+        "number": 3,
+        "image": "https://imgproxy.leaflets.schwarz/E4sK4Ou3-nPkX_FD5Lan3AQzgX_Z6oXsol2jlFmj_KM/rs:fit:1200:1200:1/g:no/czM6Ly9sZWFmbGV0cy9pbWFnZXMvMDE5ZjM3ODktZWJkNC03ZmJmLTlhZTQtM2QzNzIwMGEzYjEzL3BhZ2UtMDNfMzlkNmM2ZTBjNmM5MjFhNGNkMThkODUwYzk2YTExZDUucG5n.jpg",
+        "keyWords": "Gemüse Highlight Woche Lidl Plus -25% Aktion -28% -20% Frischer Zucker Mais Ursprung Spanien Klasse Stück Nektarinen Salat-Mix Tomaten Mix Bananen Lose Guatemala Draußen Thai-Monstera Höhe Topf Staude",
+        "altText": "Lidl Plus Angebote für frisches Gemüse wie Zuckermais, Nektarinen, Tomaten und Salat-Mix sowie saisonale Pflanzen für drinnen und draußen."
+      },
+      {
+        "number": 14,
+        "image": "https://imgproxy.leaflets.schwarz/9iUrUCXiUM5KJCU1_tWzDlVN67W2R8FjV8pESsD-VYs/rs:fit:1200:1200:1/g:no/czM6Ly9sZWFmbGV0cy9pbWFnZXMvMDE5ZjM3ODktZWJkNC03ZmJmLTlhZTQtM2QzNzIwMGEzYjEzL3BhZ2UtMTRfNDE1NTZlODA1MWUxNjhiNDk3ZmU3ZDc2NTY5NmI4MTMucG5n.jpg",
+        "keyWords": "Bester Backshop Lohnt Fladenbrot Kümmel Sesam Stück Entspricht Kauf Normalpreis Lidl Plus -23% Aktion 2Er-Pack Dunkin' Donuts Kakao Haselnuss Heidelbeer- Vanille- Hörnchen -22% Frischluftstall Fischer",
+        "altText": "Angebote aus dem Lidl-Backshop wie Fladenbrot und Donuts sowie frische Fleisch- und Fischprodukte wie Lachsfilet und Rinderhackfleisch."
+      },
+      {
+        "number": 10,
+        "image": "https://imgproxy.leaflets.schwarz/TSVaoa5IyJYyLBiod9tTj4j5ALzBXjPKFfZ062FgHaY/rs:fit:1200:1200:1/g:no/czM6Ly9sZWFmbGV0cy9pbWFnZXMvMDE5ZjM3ODktZWJkNC03ZmJmLTlhZTQtM2QzNzIwMGEzYjEzL3BhZ2UtMTBfMmU0MDRlMGNiMDI5NTU0ZDIxYzYxNDE3NmJhZjA3ZTkucG5n.jpg",
+        "keyWords": "Shoppe Lidl Plus Shoppen Versand- Kosten Sparen Kostenlose Retoure Tage Kenwood Stabmixer Typ „Triblade Stufen- Lose Geschwindigkeitsrege- Normalem- Stück Tefal Bratpfanne Titanium Recyceltem Herdarte",
+        "altText": "Online-Angebote für Küchengeräte wie Kenwood Stabmixer, Tefal Bratpfannen, Silvercrest Schnellkochtöpfe und Kaffeemaschinen."
+      }
+    ]
+  }
+}
