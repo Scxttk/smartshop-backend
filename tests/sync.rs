@@ -144,7 +144,7 @@ fn cfg(base_url: &str) -> PushConfig {
 }
 
 fn opts(db_path: &str) -> SyncOptions {
-    SyncOptions { db_path: db_path.to_string(), dry_run: false, max_regions: 10 }
+    SyncOptions { db_path: db_path.to_string(), dry_run: false, max_regions: 10, only: None }
 }
 
 /// Fetcher-Stub: eine REWE-Kette mit 2 Angeboten, protokolliert die PLZs.
@@ -178,7 +178,13 @@ fn fetch_regions_parses_plz_list_in_order() {
     assert_eq!(get.method, "GET");
     assert!(get.target.starts_with("/rest/v1/regions?"), "Target: {}", get.target);
     assert!(get.target.contains("active=eq.true"), "Target: {}", get.target);
-    assert!(get.target.contains("order=requested_at"), "Target: {}", get.target);
+    // Unsyncte Regionen zuerst, dann älteste Anfrage.
+    assert!(
+        get.target.contains("order=last_synced.asc.nullsfirst%2Crequested_at.asc")
+            || get.target.contains("order=last_synced.asc.nullsfirst,requested_at.asc"),
+        "Target: {}",
+        get.target
+    );
     assert_eq!(get.header("apikey"), Some("test-key"));
     assert_eq!(get.header("authorization"), Some("Bearer test-key"));
 }
@@ -297,13 +303,45 @@ fn dry_run_only_reads_regions() {
     let (base_url, log) = spawn_mock(r#"[{"plz":"01219"}]"#);
     let fetcher = ok_fetcher(Arc::new(Mutex::new(Vec::new())));
     let db_path = temp_db("dryrun");
-    let opts = SyncOptions { db_path, dry_run: true, max_regions: 10 };
+    let opts = SyncOptions { db_path, dry_run: true, max_regions: 10, only: None };
     sync::run(&opts, Some(&cfg(&base_url)), &fetcher).unwrap();
 
     let reqs = log.lock().unwrap().clone();
     assert_eq!(reqs.len(), 1, "nur der regions-GET erwartet: {reqs:#?}");
     assert_eq!(reqs[0].method, "GET");
     assert!(reqs[0].target.starts_with("/rest/v1/regions"));
+}
+
+#[test]
+fn only_mode_registers_and_syncs_single_plz_without_region_list() {
+    let (base_url, log) = spawn_mock("[]");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let fetcher = ok_fetcher(calls.clone());
+    let db_path = temp_db("only");
+    let opts = SyncOptions {
+        db_path,
+        dry_run: false,
+        max_regions: 10,
+        only: Some("04626".to_string()),
+    };
+    sync::run(&opts, Some(&cfg(&base_url)), &fetcher).unwrap();
+
+    // Genau die eine PLZ wurde gescrapet …
+    assert_eq!(calls.lock().unwrap().clone(), vec!["04626"]);
+
+    let reqs = log.lock().unwrap().clone();
+    // … die Regionsliste wurde NICHT geladen …
+    assert!(
+        !reqs.iter().any(|r| r.method == "GET" && r.target.starts_with("/rest/v1/regions")),
+        "{reqs:#?}"
+    );
+    // … und die PLZ wurde idempotent registriert (erster regions-POST; der
+    // Push schickt am Ende noch den last_synced-Upsert an dieselbe Tabelle).
+    let register = reqs
+        .iter()
+        .find(|r| r.method == "POST" && r.target.starts_with("/rest/v1/regions"))
+        .expect("regions-POST fehlt");
+    assert!(register.body.contains("04626"), "Body: {}", register.body);
 }
 
 #[test]

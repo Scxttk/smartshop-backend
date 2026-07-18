@@ -5,9 +5,15 @@ on:
     # 04:30 UTC = 06:30 MESZ (Sommer) bzw. 05:30 MEZ (Winter) — siehe docs/ci.md.
     - cron: "30 4 * * *"
   workflow_dispatch:
+    inputs:
+      plz:
+        description: "Nur diese PLZ syncen (On-Demand-Trigger); leer = Voll-Sync"
+        required: false
+        default: ""
 
 concurrency:
-  group: nightly
+  # On-Demand-Läufe für verschiedene PLZs dürfen parallel zum Voll-Sync laufen.
+  group: nightly-${{ inputs.plz || 'all' }}
   cancel-in-progress: false
 
 env:
@@ -89,12 +95,17 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           REWE_CERT: ${{ steps.rewe.outputs.cert }}
           REWE_KEY: ${{ steps.rewe.outputs.key }}
+          ONLY_PLZ: ${{ inputs.plz }}
         run: |
           set -o pipefail
           CERT_ARGS=()
           [ -n "${REWE_CERT:-}" ] && [ -f "$REWE_CERT" ] && CERT_ARGS+=(--cert "$REWE_CERT")
           [ -n "${REWE_KEY:-}" ] && [ -f "$REWE_KEY" ] && CERT_ARGS+=(--key "$REWE_KEY")
+          # On-Demand-Trigger (Region-INSERT): nur die neue PLZ syncen.
+          ONLY_ARGS=()
+          [ -n "${ONLY_PLZ:-}" ] && ONLY_ARGS+=(--only "$ONLY_PLZ")
           if ./target/release/smartshop sync-regions --db "$DB" \
+              ${ONLY_ARGS[@]+"${ONLY_ARGS[@]}"} \
               ${CERT_ARGS[@]+"${CERT_ARGS[@]}"} 2>&1 | tee "$LOG"; then
             echo "sync_failed=false" >> "$GITHUB_OUTPUT"
           else
@@ -103,9 +114,10 @@ jobs:
           fi
 
       # Bootstrap-Fallback: alter Einzel-PLZ-Pfad mit SMARTSHOP_ZIP, damit die
-      # Pipeline nie dunkel geht.
+      # Pipeline nie dunkel geht. Bei On-Demand-Läufen (inputs.plz) wäre der
+      # Fallback die falsche PLZ — dort übernimmt der nächtliche Voll-Sync.
       - name: Fallback fetch+push (single ZIP)
-        if: steps.sync.outputs.sync_failed == 'true'
+        if: steps.sync.outputs.sync_failed == 'true' && inputs.plz == ''
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
