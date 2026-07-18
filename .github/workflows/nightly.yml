@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 45
     env:
       SMARTSHOP_ZIP: ${{ vars.SMARTSHOP_ZIP }}
+      # `secrets` ist in Step-`if` nicht erlaubt — Verfügbarkeit hier als Env-Flag.
+      REWE_SECRETS_SET: ${{ secrets.REWE_CERT_PEM != '' && secrets.REWE_KEY_PEM != '' }}
       DB: ${{ github.workspace }}/nightly.db
       LOG: ${{ github.workspace }}/nightly.log
     steps:
@@ -48,14 +50,14 @@ jobs:
       # solange es gültiges base64 ist; wir dekodieren immer und schreiben das
       # Ergebnis — bei Plain-PEM setze base64-kodierte Secrets via `gh secret set`).
       - name: Setup Go (für rewerse)
-        if: ${{ secrets.REWE_CERT_PEM != '' && secrets.REWE_KEY_PEM != '' }}
+        if: ${{ env.REWE_SECRETS_SET == 'true' }}
         uses: actions/setup-go@v5
         with:
           go-version: stable
 
       - name: Setup rewerse + Rewe-Zertifikat
         id: rewe
-        if: ${{ secrets.REWE_CERT_PEM != '' && secrets.REWE_KEY_PEM != '' }}
+        if: ${{ env.REWE_SECRETS_SET == 'true' }}
         env:
           REWE_CERT_PEM: ${{ secrets.REWE_CERT_PEM }}
           REWE_KEY_PEM: ${{ secrets.REWE_KEY_PEM }}
