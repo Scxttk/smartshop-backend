@@ -386,6 +386,35 @@ fn parse_rows(body: &str) -> Vec<SupabaseRow> {
         .collect()
 }
 
+// Regression (Lidl, Juli 2026): Angebote ohne valid_from dürfen nie nach
+// Supabase — die App filtert sie serverseitig weg und der Upsert-Schlüssel
+// (market, product, valid_from, region) ist nicht NULL-sicher, jeder Lauf
+// würde sie duplizieren.
+#[test]
+fn push_skips_offers_without_valid_from() {
+    let db_path = temp_db("nodate");
+    seed_db(&db_path, 3);
+    {
+        let conn = db::open(&db_path).unwrap();
+        let mut dateless = offer("Ohne Datum", Some(2.49));
+        dateless.valid_from = None;
+        db::upsert_offer(&conn, &dateless).unwrap();
+    }
+    let (base_url, log) = spawn_mock();
+
+    run_push(&db_path, &base_url).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    let upserted: Vec<SupabaseRow> = reqs
+        .iter()
+        .filter(|r| r.method == "POST" && r.target.starts_with("/rest/v1/offers?"))
+        .flat_map(|r| parse_rows(&r.body))
+        .collect();
+    assert_eq!(upserted.len(), 3, "nur die 3 datierten Angebote");
+    assert!(upserted.iter().all(|r| r.valid_from.is_some()));
+    assert!(!upserted.iter().any(|r| r.product == "Ohne Datum"));
+}
+
 #[test]
 fn push_fails_with_german_error_on_http_error() {
     let db_path = temp_db("err");

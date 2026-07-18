@@ -212,9 +212,21 @@ pub struct PushOptions {
     pub mirror_images: bool,
 }
 
+/// Upload-fertige Zeilen einer Kette plus Zähler der übersprungenen Angebote.
+pub struct ChainRows {
+    pub rows: Vec<SupabaseRow>,
+    /// Angebote ohne Preis — die kann die App nicht anzeigen.
+    pub no_price: usize,
+    /// Angebote ohne valid_from — die App filtert sie serverseitig weg und
+    /// der Upsert-Schlüssel (market, product, valid_from, region) ist nicht
+    /// NULL-sicher, jeder Lauf würde sie duplizieren.
+    pub no_date: usize,
+}
+
 /// Angebote aus der lokalen DB laden und pro Kette gruppieren (gemappt,
-/// dedupliziert; Angebote ohne Preis werden mitgezählt, aber übersprungen).
-fn load_grouped(opts: &PushOptions) -> Result<BTreeMap<&'static str, (Vec<SupabaseRow>, usize)>> {
+/// dedupliziert; Angebote ohne Preis oder ohne valid_from werden mitgezählt,
+/// aber übersprungen).
+fn load_grouped(opts: &PushOptions) -> Result<BTreeMap<&'static str, ChainRows>> {
     let conn = db::open(&opts.db_path)?;
     let markets = db::markets(&conn)?;
     let offers = db::export_offers(&conn, None)?;
@@ -244,22 +256,34 @@ fn load_grouped(opts: &PushOptions) -> Result<BTreeMap<&'static str, (Vec<Supaba
 
     Ok(groups
         .into_iter()
-        .map(|(chain, (offers, skipped))| {
-            let rows = offers
+        .map(|(chain, (offers, no_price))| {
+            let mapped: Vec<SupabaseRow> = offers
                 .iter()
                 .filter_map(|o| map_offer(o, chain, opts.region.as_deref()))
                 .collect();
-            (chain, (dedupe_rows(rows), skipped))
+            let (rows, dateless): (Vec<_>, Vec<_>) =
+                mapped.into_iter().partition(|r| r.valid_from.is_some());
+            let no_date = dateless.len();
+            if no_date > 0 {
+                eprintln!(
+                    "WARNUNG [{chain}] {no_date} Angebote ohne valid_from — nicht hochgeladen."
+                );
+            }
+            (chain, ChainRows { rows: dedupe_rows(rows), no_price, no_date })
         })
         .collect())
 }
 
-fn dry_run_report(groups: &BTreeMap<&'static str, (Vec<SupabaseRow>, usize)>) -> Result<()> {
+fn skipped_note(g: &ChainRows) -> String {
+    format!("{} ohne Preis, {} ohne Datum übersprungen", g.no_price, g.no_date)
+}
+
+fn dry_run_report(groups: &BTreeMap<&'static str, ChainRows>) -> Result<()> {
     println!("Dry-Run — es wird nichts hochgeladen.");
-    for (chain, (rows, skipped)) in groups {
-        println!("  [{chain}] {} Zeilen ({skipped} ohne Preis übersprungen)", rows.len());
+    for (chain, g) in groups {
+        println!("  [{chain}] {} Zeilen ({})", g.rows.len(), skipped_note(g));
     }
-    let samples: Vec<&SupabaseRow> = groups.values().flat_map(|(r, _)| r).take(3).collect();
+    let samples: Vec<&SupabaseRow> = groups.values().flat_map(|g| &g.rows).take(3).collect();
     if !samples.is_empty() {
         println!("Beispiel-Zeilen:");
         println!("{}", serde_json::to_string_pretty(&samples)?);
@@ -283,7 +307,7 @@ fn check_response(what: &str, resp: reqwest::blocking::Response) -> Result<()> {
 /// (Emoji bleibt der letzte Fallback) und brechen den Push nicht ab.
 /// Liefert (neu gespiegelt, aus Cache, fehlgeschlagen).
 fn mirror_images(
-    groups: &mut BTreeMap<&'static str, (Vec<SupabaseRow>, usize)>,
+    groups: &mut BTreeMap<&'static str, ChainRows>,
     cfg: &PushConfig,
     db_path: &str,
 ) -> Result<(usize, usize, usize)> {
@@ -291,8 +315,8 @@ fn mirror_images(
     let client = reqwest::blocking::Client::new();
     let (mut fresh, mut cached, mut failed) = (0usize, 0usize, 0usize);
 
-    for (_chain, (rows, _)) in groups.iter_mut() {
-        for row in rows.iter_mut() {
+    for (_chain, g) in groups.iter_mut() {
+        for row in g.rows.iter_mut() {
             let Some(src) = row.image_url.clone() else { continue };
             // Schon eine Bucket-URL (z. B. erneuter Lauf ohne DB-Cache-Treffer)?
             if src.contains(&format!("/{}/", storage::BUCKET)) {
@@ -378,9 +402,10 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
     };
 
     let mut total = 0usize;
-    for (chain, (rows, skipped)) in &groups {
+    for (chain, g) in &groups {
+        let rows = &g.rows;
         if rows.is_empty() {
-            println!("  [{chain}] Keine Angebote mit Preis — übersprungen.");
+            println!("  [{chain}] Keine hochladbaren Angebote ({}).", skipped_note(g));
             continue;
         }
 
@@ -408,12 +433,12 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
             check_response(&format!("[{chain}] Upsert von {} Angeboten", batch.len()), resp)?;
         }
         total += rows.len();
-        println!("  [{chain}] {} Angebote hochgeladen ({skipped} ohne Preis übersprungen).", rows.len());
+        println!("  [{chain}] {} Angebote hochgeladen ({}).", rows.len(), skipped_note(g));
     }
 
     // Preis-Historie best-effort mitschreiben: Fehler (z. B. Tabelle noch
     // nicht migriert) warnen nur und lassen den Offers-Push erfolgreich.
-    let history_rows: Vec<&SupabaseRow> = groups.values().flat_map(|(r, _)| r).collect();
+    let history_rows: Vec<&SupabaseRow> = groups.values().flat_map(|g| &g.rows).collect();
     if !history_rows.is_empty() {
         match push_history(&client, cfg, &history_rows) {
             Ok(n) => println!("Preis-Historie: {n} Zeilen upsertet."),
