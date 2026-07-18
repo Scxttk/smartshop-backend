@@ -1,3 +1,11 @@
 /target
 *.db
 .DS_Store
+
+# Rewe-Client-Zertifikat & Extraktions-Artefakte — NIEMALS committen
+# (siehe docs/rewe-cert.md; Ablage nur unter ~/.config/smartshop/)
+*.pem
+*.key
+*.pfx
+*.apk
+*.xapk

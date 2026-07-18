@@ -221,7 +221,7 @@ wurde einmalig im Supabase SQL-Editor ausgeführt (siehe
 
 | Kette | Auth nötig | Markt | Angebote (ballpark) |
 |---|---|---|---|
-| Rewe | ja — TLS-Cert + `rewerse` | filialspezifisch (PLZ) | variiert je Filiale |
+| Rewe | ja — TLS-Cert + `rewerse` | filialspezifisch (PLZ) | ~323 |
 | Penny | nein | filialspezifisch (PLZ) | ~540 |
 | Kaufland | nein | filialspezifisch (PLZ) | variiert (nicht jede PLZ) |
 | Lidl | nein | national¹ | ~470 |
@@ -232,8 +232,9 @@ wurde einmalig im Supabase SQL-Editor ausgeführt (siehe
 
 Ballpark-Zahlen aus einem Live-Abruf für PLZ 50667 (Köln) am 2026-07-17;
 tatsächliche Zahlen schwanken pro Woche und Filiale. Kaufland und EDEKA lieferten
-für diese PLZ keinen Treffer — beide sind regionsabhängig. Rewe wurde mangels
-Zertifikat nicht live gemessen.
+für diese PLZ keinen Treffer — beide sind regionsabhängig. Der Rewe-Wert (~323)
+stammt aus einem Live-Abruf für PLZ 01219 (Dresden, Markt „REWE Supermarkt",
+ID 565005) am 2026-07-18.
 
 ¹ Die *Angebote* sind national, die *Präsenz* nicht mehr: `find_market` fragt
 den offiziellen Filialfinder der Kette (Lidl: Bing Spatial Data Service hinter
