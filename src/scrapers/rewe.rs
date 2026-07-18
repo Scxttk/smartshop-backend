@@ -15,8 +15,9 @@ fn rewerse_cmd(cert: &str, key: &str) -> Command {
 
 pub fn find_market(zip: &str, cert: &str, key: &str) -> Result<Market> {
     check_certs(cert, key)?;
+    // -json ist ein globales Flag und muss VOR dem Kommando stehen (rewerse v1.2.0).
     let output = rewerse_cmd(cert, key)
-        .args(["markets", "search", "-query", zip, "-json"])
+        .args(["-json", "markets", "search", "-query", zip])
         .output()
         .context("rewerse CLI nicht gefunden — bitte installieren (siehe README)")?;
 
@@ -36,11 +37,13 @@ pub fn find_market(zip: &str, cert: &str, key: &str) -> Result<Market> {
         .context("Keine Märkte in der Antwort")?;
 
     let first = markets.first().context("Kein Markt für diese PLZ gefunden")?;
+    // rewerse v1.2.0 nennt die Markt-ID "wwIdent" (frühere Felder: marketId/id).
     let id = first
-        .get("marketId")
+        .get("wwIdent")
+        .or_else(|| first.get("marketId"))
         .or_else(|| first.get("id"))
         .and_then(|v| v.as_str())
-        .context("marketId fehlt")?;
+        .context("wwIdent fehlt")?;
     let name = first
         .get("name")
         .and_then(|v| v.as_str())
@@ -51,8 +54,9 @@ pub fn find_market(zip: &str, cert: &str, key: &str) -> Result<Market> {
 
 pub fn fetch_offers(market: &Market, cert: &str, key: &str) -> Result<Vec<Offer>> {
     check_certs(cert, key)?;
+    // -json global vor das Kommando (rewerse v1.2.0).
     let output = rewerse_cmd(cert, key)
-        .args(["discounts", "-market", &market.id, "-json"])
+        .args(["-json", "discounts", "-market", &market.id])
         .output()
         .context("rewerse CLI nicht gefunden")?;
 
@@ -83,95 +87,157 @@ fn check_certs(cert: &str, key: &str) -> Result<()> {
 pub fn parse_offers(raw: serde_json::Value, market_id: &str) -> Result<Vec<Offer>> {
     let mut offers = Vec::new();
 
-    // rewerse returns: { "current": { "fromDate", "untilDate", "categories": [...] }, "next": {...} }
-    for week_key in &["current", "next"] {
-        let Some(week) = raw.get(week_key) else { continue };
-        let from = week.get("fromDate").and_then(|v| v.as_str()).map(String::from);
-        let until = week.get("untilDate").and_then(|v| v.as_str()).map(String::from);
+    // rewerse v1.2.0 discounts -json liefert:
+    //   { "validUntil": "2026-07-18T00:00:00Z",
+    //     "categories": [ { "id", "title", "index",
+    //       "offers": [ { "title", "subtitle", "images", "priceRaw", "price",
+    //                     "priceParseFail", "nutriScore", ... } ] } ] }
+    // Kein current/next-Wrapper, kein fromDate/regularPrice/overline/flyerPage/biozid mehr.
+    let valid_until = raw
+        .get("validUntil")
+        .and_then(|v| v.as_str())
+        // Zeitanteil abschneiden: "2026-07-18T00:00:00Z" -> "2026-07-18".
+        .map(|s| s.split('T').next().unwrap_or(s).to_string());
 
-        let categories = week
-            .get("categories")
+    // Die v1.2.0-API liefert kein Startdatum mehr — valid_from ist eine Ableitung:
+    // Rewe-Wochenangebote gelten Mo–Sa, also Montag der Woche von validUntil.
+    // Ohne validUntil: laufende Woche (heute in Europe/Berlin) als Fallback.
+    let (valid_from, valid_until) = match valid_until
+        .as_deref()
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+    {
+        Some(until) => (
+            Some(monday_of_week(until).format("%Y-%m-%d").to_string()),
+            valid_until,
+        ),
+        None => {
+            let today = chrono::Utc::now().with_timezone(&chrono_tz::Europe::Berlin).date_naive();
+            let (mon, sat) = week_bounds(today);
+            (
+                Some(mon.format("%Y-%m-%d").to_string()),
+                Some(sat.format("%Y-%m-%d").to_string()),
+            )
+        }
+    };
+
+    let categories = raw
+        .get("categories")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    for cat in &categories {
+        // Kategorie-Titel sind echte Produktgruppen ("Obst und Gemüse", "Kühlung",
+        // "Drogerie", ...) und dienen der Kategorisierung in enrich.rs.
+        let category = cat.get("title").and_then(|v| v.as_str()).map(String::from);
+        let raw_offers = cat
+            .get("offers")
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
 
-        for cat in &categories {
-            let category = cat.get("title").and_then(|v| v.as_str()).map(String::from);
-            let raw_offers = cat
-                .get("offers")
+        for raw_offer in &raw_offers {
+            let title = match raw_offer.get("title").and_then(|v| v.as_str()) {
+                Some(t) => t.to_string(),
+                None => continue,
+            };
+
+            let subtitle = raw_offer.get("subtitle").and_then(|v| v.as_str()).map(String::from);
+
+            // rewerse parst den Preis bereits als Float (price); bei priceParseFail
+            // (price == 0) auf den Rohtext (priceRaw, z. B. "2,22 €") zurückfallen.
+            let price = raw_offer
+                .get("price")
+                .and_then(|v| v.as_f64())
+                .filter(|p| *p > 0.0)
+                .or_else(|| {
+                    raw_offer.get("priceRaw").and_then(|v| v.as_str()).and_then(parse_price_str)
+                });
+
+            // nutriScore ist häufig "" -> als None behandeln.
+            let nutri_score = raw_offer
+                .get("nutriScore")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+
+            let images: Vec<String> = raw_offer
+                .get("images")
                 .and_then(|v| v.as_array())
-                .cloned()
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(String::from).collect())
                 .unwrap_or_default();
 
-            for raw_offer in &raw_offers {
-                let title = match raw_offer.get("title").and_then(|v| v.as_str()) {
-                    Some(t) => t.to_string(),
-                    None => continue,
-                };
+            let id = Offer::build_id(market_id, &title, valid_until.as_deref());
 
-                let subtitle = raw_offer.get("subtitle").and_then(|v| v.as_str()).map(String::from);
-                let overline = raw_offer.get("overline").and_then(|v| v.as_str()).map(String::from);
-                let biozid = raw_offer.get("biozid").and_then(|v| v.as_bool()).unwrap_or(false);
-
-                // rewerse returns prices already parsed as floats
-                let price = raw_offer
-                    .get("priceData")
-                    .and_then(|p| p.get("price"))
-                    .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(parse_price_str)));
-                let regular_price = raw_offer
-                    .get("priceData")
-                    .and_then(|p| p.get("regularPrice"))
-                    .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(parse_price_str)));
-
-                let nutri_score = raw_offer
-                    .get("detail")
-                    .and_then(|d| d.get("nutriScore"))
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
-
-                let cat_title = raw_offer
-                    .get("rawValues")
-                    .and_then(|rv| rv.get("categoryTitle"))
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-                    .or_else(|| category.clone());
-
-                let flyer_page = raw_offer
-                    .get("rawValues")
-                    .and_then(|rv| rv.get("flyerPage"))
-                    .and_then(|v| v.as_i64());
-
-                let images: Vec<String> = raw_offer
-                    .get("images")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(String::from).collect())
-                    .unwrap_or_default();
-
-                let id = Offer::build_id(market_id, &title, from.as_deref());
-
-                offers.push(Offer {
-                    id,
-                    market_id: market_id.to_string(),
-                    title,
-                    subtitle,
-                    overline,
-                    price,
-                    regular_price,
-                    category: cat_title,
-                    nutri_score,
-                    valid_from: from.clone(),
-                    valid_until: until.clone(),
-                    images,
-                    biozid,
-                    flyer_page,
-                });
-            }
+            offers.push(Offer {
+                id,
+                market_id: market_id.to_string(),
+                title,
+                subtitle,
+                overline: None,
+                price,
+                regular_price: None,
+                category: category.clone(),
+                nutri_score,
+                valid_from: valid_from.clone(),
+                valid_until: valid_until.clone(),
+                images,
+                biozid: false,
+                flyer_page: None,
+            });
         }
     }
 
     Ok(offers)
 }
 
+/// Montag der ISO-Woche, in der `date` liegt (Rewe-Angebote gelten Mo–Sa).
+pub fn monday_of_week(date: chrono::NaiveDate) -> chrono::NaiveDate {
+    use chrono::Datelike;
+    date - chrono::Days::new(u64::from(date.weekday().num_days_from_monday()))
+}
+
+/// Fallback ohne API-Datum: (Montag, Samstag) der Woche von `today`.
+pub fn week_bounds(today: chrono::NaiveDate) -> (chrono::NaiveDate, chrono::NaiveDate) {
+    let mon = monday_of_week(today);
+    (mon, mon + chrono::Days::new(5))
+}
+
 fn parse_price_str(s: &str) -> Option<f64> {
-    s.trim().replace('.', "").replace(',', ".").parse::<f64>().ok()
+    // "2,22 €" / "1.299,00 €" -> Float: alles außer Ziffern/Komma/Punkt entfernen,
+    // dann deutschen Tausenderpunkt weg und Komma zum Dezimalpunkt machen.
+    let cleaned: String =
+        s.chars().filter(|c| c.is_ascii_digit() || *c == ',' || *c == '.').collect();
+    cleaned.replace('.', "").replace(',', ".").parse::<f64>().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{monday_of_week, week_bounds};
+    use chrono::NaiveDate;
+
+    fn d(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn montag_bleibt_montag() {
+        assert_eq!(monday_of_week(d("2026-07-13")), d("2026-07-13"));
+    }
+
+    #[test]
+    fn sonntag_gehoert_zur_selben_iso_woche() {
+        assert_eq!(monday_of_week(d("2026-07-19")), d("2026-07-13"));
+    }
+
+    #[test]
+    fn jahreswechsel() {
+        // 2027-01-01 ist ein Freitag -> Montag 2026-12-28.
+        assert_eq!(monday_of_week(d("2027-01-01")), d("2026-12-28"));
+    }
+
+    #[test]
+    fn week_bounds_montag_bis_samstag() {
+        assert_eq!(week_bounds(d("2026-07-15")), (d("2026-07-13"), d("2026-07-18")));
+    }
 }

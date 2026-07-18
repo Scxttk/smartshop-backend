@@ -8,31 +8,32 @@ use smartshop::scrapers;
 // ---------------------------------------------------------------- REWE
 
 #[test]
-fn rewe_fixture_parses_current_and_next_week() {
+fn rewe_fixture_parses_discounts() {
     let raw: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/rewe/discounts.json")).unwrap();
-    let offers = scrapers::rewe::parse_offers(raw, "1763153").unwrap();
+    let offers = scrapers::rewe::parse_offers(raw, "565005").unwrap();
     assert_eq!(offers.len(), 4);
 
-    let melone = &offers[0];
-    assert_eq!(melone.title, "Wassermelone");
-    assert_eq!(melone.price, Some(0.99));
-    assert_eq!(melone.regular_price, Some(1.49));
-    assert_eq!(melone.valid_from.as_deref(), Some("2026-07-13"));
-    assert_eq!(melone.flyer_page, Some(1));
+    // validUntil (top-level, ISO-Zeitstempel) wird auf das Datum gekürzt und
+    // auf jedes Angebot gesetzt; valid_from liefert rewerse v1.2.0 nicht mehr
+    // und wird als Montag derselben Woche abgeleitet.
+    let tomaten = &offers[0];
+    assert_eq!(tomaten.title, "Mini Rispentomaten");
+    assert_eq!(tomaten.price, Some(1.69));
+    assert_eq!(tomaten.valid_until.as_deref(), Some("2026-07-18"));
+    assert_eq!(tomaten.valid_from.as_deref(), Some("2026-07-13"));
+    assert_eq!(tomaten.category.as_deref(), Some("Obst und Gemüse"));
 
-    // String-Preise ("2,49") und Nutri-Score
-    let beeren = offers.iter().find(|o| o.title == "Bio Heidelbeeren").unwrap();
-    assert_eq!(beeren.price, Some(2.49));
-    assert_eq!(beeren.nutri_score.as_deref(), Some("A"));
+    // price bereits als Float, Nutri-Score gesetzt
+    let actimel = offers.iter().find(|o| o.title == "Danone Actimel Drink").unwrap();
+    assert_eq!(actimel.price, Some(2.22));
+    assert_eq!(actimel.nutri_score.as_deref(), Some("B"));
+    assert_eq!(actimel.category.as_deref(), Some("Kühlung"));
 
-    let spray = offers.iter().find(|o| o.title == "Insektenspray").unwrap();
-    assert!(spray.biozid);
-    assert_eq!(spray.regular_price, Some(5.49));
-
-    // "next"-Woche wird mit eigenen Daten übernommen
-    let joghurt = offers.iter().find(|o| o.title == "Landliebe Joghurt").unwrap();
-    assert_eq!(joghurt.valid_from.as_deref(), Some("2026-07-20"));
+    // priceParseFail (price == 0) -> Fallback auf priceRaw "1.299,00 €"
+    let fallback = offers.iter().find(|o| o.title == "Test Preisfallback").unwrap();
+    assert_eq!(fallback.price, Some(1299.00));
+    assert_eq!(fallback.nutri_score, None);
 }
 
 // ---------------------------------------------------------------- Netto

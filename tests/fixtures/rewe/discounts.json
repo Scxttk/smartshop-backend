@@ -1,56 +1,81 @@
 {
-  "_comment": "Handgebaute Minimal-Antwort im Format des rewerse-CLI (discounts -json). Kein Live-Mitschnitt, da rewerse das REWE-Client-Zertifikat braucht. Struktur laut src/scrapers/rewe.rs::parse_offers.",
-  "current": {
-    "fromDate": "2026-07-13",
-    "untilDate": "2026-07-18",
-    "categories": [
-      {
-        "title": "Obst & Gemüse",
-        "offers": [
-          {
-            "title": "Wassermelone",
-            "subtitle": "je 1 kg",
-            "priceData": { "price": 0.99, "regularPrice": 1.49 },
-            "images": ["https://img.rewe.example/wassermelone.png"],
-            "rawValues": { "categoryTitle": "Obst & Gemüse", "flyerPage": 1 }
-          },
-          {
-            "title": "Bio Heidelbeeren",
-            "subtitle": "je 300-g-Schale",
-            "overline": "REWE Bio",
-            "priceData": { "price": "2,49" },
-            "detail": { "nutriScore": "A" },
-            "rawValues": { "categoryTitle": "Obst & Gemüse", "flyerPage": 1 }
-          }
-        ]
-      },
-      {
-        "title": "Drogerie",
-        "offers": [
-          {
-            "title": "Insektenspray",
-            "biozid": true,
-            "priceData": { "price": 3.99, "regularPrice": "5,49" },
-            "rawValues": { "categoryTitle": "Drogerie", "flyerPage": 12 }
-          }
-        ]
-      }
-    ]
-  },
-  "next": {
-    "fromDate": "2026-07-20",
-    "untilDate": "2026-07-25",
-    "categories": [
-      {
-        "title": "Molkereiprodukte",
-        "offers": [
-          {
-            "title": "Landliebe Joghurt",
-            "subtitle": "je 450-g-Becher",
-            "priceData": { "price": 0.79, "regularPrice": 1.19 }
-          }
-        ]
-      }
-    ]
-  }
+  "_comment": "Gekürzte Live-Antwort des rewerse-CLI v1.2.0 (discounts -json), Markt 565005 Dresden, KW 29 2026 (2026-07-18). Auf wenige Angebote reduziert. Struktur: top-level categories + validUntil.",
+  "validUntil": "2026-07-18T00:00:00Z",
+  "categories": [
+    {
+      "id": "obst-und-gemuese",
+      "title": "Obst und Gemüse",
+      "index": 6,
+      "offers": [
+        {
+          "title": "Mini Rispentomaten",
+          "subtitle": "Kl. I, je 350-g-Schale (1 kg = 4,83 €)",
+          "images": [
+            "https://img.rewe-static.de/REWE29_2026/0353041/31264784-30_digital-image.png"
+          ],
+          "priceRaw": "1,69 €",
+          "price": 1.69,
+          "priceParseFail": false,
+          "manufacturer": "++L REWE BW",
+          "articleNo": "353041",
+          "nutriScore": "",
+          "productCategory": "obst-und-gemuese"
+        },
+        {
+          "title": "Cherry Romatomaten",
+          "subtitle": "Kl. I, je 400-g-Schale (1 kg = 5,55 €)",
+          "images": [
+            "https://img.rewe-static.de/REWE29_2026/7011307/31264808-34_digital-image.png"
+          ],
+          "priceRaw": "2,22 €",
+          "price": 2.22,
+          "priceParseFail": false,
+          "manufacturer": "++L REWE BW",
+          "articleNo": "7011307",
+          "nutriScore": "",
+          "productCategory": "obst-und-gemuese"
+        }
+      ]
+    },
+    {
+      "id": "kuehlung",
+      "title": "Kühlung",
+      "index": 8,
+      "offers": [
+        {
+          "title": "Danone Actimel Drink",
+          "subtitle": "versch. Sorten, je 8 x 100-g-Fl.-Pckg. (1 kg = 2,78 €)",
+          "images": [
+            "https://img.rewe-static.de/REWE29_2026/3807371/46042053-18_digital-image.png"
+          ],
+          "priceRaw": "2,22 €",
+          "price": 2.22,
+          "priceParseFail": false,
+          "manufacturer": "DANONE",
+          "articleNo": "3807371",
+          "nutriScore": "B",
+          "productCategory": "kuehlung"
+        }
+      ]
+    },
+    {
+      "id": "drogerie",
+      "title": "Drogerie",
+      "index": 19,
+      "offers": [
+        {
+          "title": "Test Preisfallback",
+          "subtitle": "je Stück",
+          "images": [],
+          "priceRaw": "1.299,00 €",
+          "price": 0,
+          "priceParseFail": true,
+          "manufacturer": "X",
+          "articleNo": "0",
+          "nutriScore": "",
+          "productCategory": "drogerie"
+        }
+      ]
+    }
+  ]
 }

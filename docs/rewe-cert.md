@@ -24,15 +24,23 @@ du smartshop mitgibst.
 
 ## Schritt 1: rewerse installieren
 
-Mit Go-Toolchain:
+Mit Go-Toolchain (falls Go fehlt: `brew install go`):
 
 ```sh
 go install github.com/ByteSizedMarius/rewerse-engineering/cmd@latest
 ```
 
-Achte darauf, dass das installierte Binary als `rewerse` im `PATH` liegt
-(`$GOPATH/bin` bzw. `~/go/bin` in den `PATH` aufnehmen; bei Bedarf das
-Binary in `rewerse` umbenennen). Alternativ ein Release-Binary von der
+**Stolperstein:** `go install …/cmd@latest` legt das Binary als `cmd` ab
+(`~/go/bin/cmd`), nicht als `rewerse`. Umbenennen bzw. symlinken und einen Ort
+wählen, der auch im nächtlichen launchd-Lauf im `PATH` liegt — `nightly.sh`
+nimmt `~/.cargo/bin` und `~/go/bin` in den `PATH` auf:
+
+```sh
+mv ~/go/bin/cmd ~/go/bin/rewerse
+ln -sf ~/go/bin/rewerse ~/.cargo/bin/rewerse   # optional, für PATH-Fallback
+```
+
+Getestet gegen `rewerse` v1.2.0. Alternativ ein Release-Binary von der
 GitHub-Releases-Seite laden.
 
 ## Schritt 2: Rewe-APK besorgen
@@ -40,6 +48,19 @@ GitHub-Releases-Seite laden.
 Lade die aktuelle Rewe-App als APK von einem APK-Mirror (z. B. APKPure).
 Laut Upstream-Doku ist die App-Version egal. Bei `.apkx`/`.xapk`-Bundles
 zuerst entpacken und die eigentliche `.apk` herausnehmen.
+
+**Stolperstein:** Der direkte APKPure-Downloadhost (`d.apkpure.com`) antwortet
+per curl gern mit `403` (Cloudflare). Der CDN-Spiegel `d.cdnpure.com` liefert die
+APK dagegen aus:
+
+```sh
+curl -sL -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) …" \
+  -o rewe.apk "https://d.cdnpure.com/b/APK/de.rewe.app.mobile?version=latest"
+file rewe.apk   # -> "Zip archive data" (nicht "HTML document")
+```
+
+Notfalls die APK im Browser herunterladen. Die `mtls_prod.pfx` (~2,6 KB) liegt
+unter `res/raw/` im Archiv.
 
 ## Schritt 3: PFX aus dem APK extrahieren
 
@@ -98,8 +119,19 @@ Erwartete Ausgabe: Marktsuche, gefundener Markt mit ID, dann die Angebotsliste
 `rewerse markets search fehlgeschlagen` fehl, direkt gegentesten:
 
 ```sh
-rewerse -cert cert.pem -key private.key markets search -query 50667 -json
+rewerse -cert cert.pem -key private.key -json markets search -query 50667
 ```
+
+**Stolperstein:** `-json` ist in rewerse v1.2.0 ein *globales* Flag und muss
+**vor** dem Kommando stehen (`-json markets search …`). Steht es dahinter,
+bricht rewerse mit `flag provided but not defined: -json` ab. smartshop
+übergibt es bereits an der richtigen Stelle.
+
+**Gültigkeitsdaten:** Die discounts-Antwort von rewerse v1.2.0 enthält nur
+noch ein Top-Level `validUntil` (kein Startdatum mehr). smartshop leitet
+`valid_from` deshalb als Montag derselben Woche ab (Rewe-Wochenangebote
+gelten Mo–Sa); fehlt auch `validUntil`, wird auf die laufende Woche in
+Europe/Berlin zurückgefallen.
 
 Liefert das JSON, liegt das Problem bei smartshop; liefert es einen
 TLS-Fehler, sind Zertifikat/Schlüssel defekt oder veraltet — dann Extraktion
