@@ -250,74 +250,56 @@ fn penny_duplicate_titles_across_categories_are_deduped() {
 
 // ---------------------------------------------------------------- Lidl
 
+// Quelle seit 2026-07: marktguru-Web-API (Wochenprospekt inkl. Lebensmittel).
+// Die frühere lidl.de-Onlineshop-Suche (store=1) enthielt nur Non-Food +
+// Weinwelt — die Filial-Lebensmittelangebote fehlten komplett.
 #[test]
-fn lidl_fixture_parses_all_tiles() {
+fn lidl_marktguru_fixture_parses_offers_and_skips_foreign_advertisers() {
     let raw: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/lidl/search_store1.json")).unwrap();
-    let items = raw["items"].as_array().unwrap();
-    assert_eq!(items.len(), 6);
+        serde_json::from_str(include_str!("fixtures/lidl/marktguru_offers.json")).unwrap();
+    let items = raw["results"].as_array().unwrap();
+    assert_eq!(items.len(), 7);
 
     let offers: Vec<_> = items
         .iter()
-        .filter_map(|it| scrapers::lidl::parse_tile(it, "LIDL_DE"))
+        .filter_map(|it| scrapers::lidl::parse_offer(it, "LIDL_5745"))
         .collect();
-    assert_eq!(offers.len(), 6, "jedes Tile muss ein Offer ergeben");
+    // Der letzte Treffer ist ein Fremdhändler (q=lidl ist Volltextsuche) und
+    // muss übersprungen werden.
+    assert_eq!(offers.len(), 6, "6 Lidl-Offers, Fremdhändler raus");
+    assert!(offers.iter().all(|o| o.title != "Fremdhändler-Produkt"));
 
-    let prosecco = &offers[0];
-    assert_eq!(prosecco.title, "ALLINI Prosecco Treviso DOC Vino Frizzante trocken, Perlwein");
-    assert_eq!(prosecco.price, Some(3.49));
-}
+    let filet = &offers[0];
+    assert_eq!(filet.title, "Hähnchen-Brustfilet");
+    assert_eq!(filet.price, Some(5.19));
+    assert_eq!(filet.subtitle.as_deref(), Some("0.6 kg"));
+    assert_eq!(filet.overline.as_deref(), Some("Metzgerfrisch"));
+    assert_eq!(filet.category.as_deref(), Some("Geflügel"));
+    // UTC "2026-07-12T22:00:00Z" = Montag 00:00 Europe/Berlin
+    assert_eq!(filet.valid_from.as_deref(), Some("2026-07-13"));
+    assert_eq!(filet.valid_until.as_deref(), Some("2026-07-18"));
+    assert_eq!(
+        filet.images,
+        vec!["https://mg2de.b-cdn.net/api/v1/offers/23984798/images/default/0/medium.jpg"]
+    );
 
-// Regression: Seit Juli 2026 liefert die Such-API kein price.startDate mehr —
-// die Filial-Gültigkeit steht als Unix-Sekunden in storeStartDate/storeEndDate
-// (Europe/Berlin). Vor dem Fix kamen alle Lidl-Angebote mit valid_from = NULL
-// an; die App filtert die serverseitig weg und der Upsert-Schlüssel
-// (market, product, valid_from, region) duplizierte sie bei jedem Lauf.
-#[test]
-fn lidl_branch_fixture_yields_validity_dates_from_epoch_fields() {
-    let raw: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/lidl/search_store_branch.json")).unwrap();
-    let items = raw["items"].as_array().unwrap();
-    assert_eq!(items.len(), 3);
+    // Dummy-Brand "thisisnobrand123" darf nicht als Overline durchkommen
+    let nektarinen = offers.iter().find(|o| o.title == "Nektarinen").unwrap();
+    assert_eq!(nektarinen.overline, None);
 
-    let offers: Vec<_> = items
-        .iter()
-        .filter_map(|it| scrapers::lidl::parse_tile(it, "LIDL_5745"))
-        .collect();
-    assert_eq!(offers.len(), 3);
+    // Halbwochen-Angebot (Do–Sa): eigenes Zeitfenster aus validityDates
+    let kaese = offers.iter().find(|o| o.title == "XXL Käsescheiben").unwrap();
+    assert_eq!(kaese.valid_from.as_deref(), Some("2026-07-16"));
+    assert_eq!(kaese.valid_until.as_deref(), Some("2026-07-18"));
 
-    let pizza = &offers[0];
-    assert_eq!(pizza.title, "SILVERCREST® Pizzateig-Boxen, 4 Stück");
-    assert_eq!(pizza.price, Some(9.99));
-    // 1784152800 = 2026-07-16 00:00 Europe/Berlin, 1784411999 = 2026-07-18 23:59:59
-    assert_eq!(pizza.valid_from.as_deref(), Some("2026-07-16"));
-    assert_eq!(pizza.valid_until.as_deref(), Some("2026-07-18"));
+    // quantity > 1 landet im Untertitel
+    let brot = offers.iter().find(|o| o.title == "Fladenbrot mit Kümmel und Sesam").unwrap();
+    assert_eq!(brot.subtitle.as_deref(), Some("3 x 1 Stk"));
 
     for o in &offers {
+        assert!(o.price.is_some(), "Preis fehlt bei {}", o.title);
         assert!(o.valid_from.is_some(), "valid_from fehlt bei {}", o.title);
         assert!(o.valid_until.is_some(), "valid_until fehlt bei {}", o.title);
-    }
-}
-
-// Regression: Lidl-Plus-exklusive Angebote haben in data.price nur eine leere
-// Hülle — der Preis steht in data.lidlPlus[0].price. Vor dem Fix kamen diese
-// ~7 Angebote pro Woche mit price = NULL an.
-#[test]
-fn lidl_plus_only_offers_get_price_from_lidl_plus_block() {
-    let raw: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/lidl/search_store1.json")).unwrap();
-    let items = raw["items"].as_array().unwrap();
-
-    let schrank = scrapers::lidl::parse_tile(&items[4], "LIDL_DE").unwrap();
-    assert_eq!(schrank.title, "LIVARNO Waschbeckenunterschrank");
-    assert_eq!(schrank.price, Some(19.99));
-    assert_eq!(schrank.regular_price, Some(39.99));
-    // "ü" kommt in der API NFD-zerlegt (u + kombinierender Umlaut)
-    assert_eq!(schrank.subtitle.as_deref(), Some("Je Stu\u{308}ck"));
-
-    for it in items {
-        let o = scrapers::lidl::parse_tile(it, "LIDL_DE").unwrap();
-        assert!(o.price.is_some(), "Preis fehlt bei {}", o.title);
     }
 }
 
