@@ -14,7 +14,9 @@ use crate::scrapers::{store_finder, util};
 // Kampagnenseiten (/c/billiger-montag/...) leiten inzwischen auf die
 // Online-Prospekte um und sind als Datenquelle tot; die Lidl-Plus-API ist
 // authentifiziert. Wichtig: Header "Accept: application/json" mitsenden,
-// sonst antwortet der Endpoint mit HTTP 406.
+// sonst antwortet der Endpoint mit HTTP 406. Die Filial-Gültigkeit liefert
+// das Tile als Unix-Sekunden (storeStartDate/storeEndDate, Europe/Berlin);
+// price.startDate/endDate (Strings) beschreiben nur noch das Online-Fenster.
 //
 // Lidl-Angebote gelten bundesweit, nicht pro Filiale. find_market liefert
 // deshalb unabhängig von der PLZ einen synthetischen National-Markt.
@@ -162,16 +164,32 @@ pub fn parse_tile(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
         .filter(|s| !s.is_empty() && *s != "Kategorien")
         .map(String::from);
 
-    // "2026-07-19T22:00" -> "2026-07-19"
-    let valid_from = price_obj
-        .and_then(|p| p.get("startDate"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.chars().take(10).collect::<String>());
-    let valid_until = price_obj
-        .and_then(|p| p.get("endDate"))
-        .and_then(|v| v.as_str())
-        .or_else(|| data.get("storeEndDate").and_then(|v| v.as_str()))
-        .map(|s| s.chars().take(10).collect::<String>());
+    // Filial-Gültigkeit steht auf Tile-Ebene als Unix-Sekunden
+    // (storeStartDate = Montag 00:00, storeEndDate = Sonntag 23:59:59, jeweils
+    // Europe/Berlin). Ältere Antworten trugen stattdessen Strings wie
+    // "2026-07-19T22:00" in price.startDate/endDate — die bleiben als
+    // Fallback, sind aber das Online-Fenster und weichen um einen Tag ab.
+    let valid_from = data
+        .get("storeStartDate")
+        .and_then(|v| v.as_i64())
+        .and_then(epoch_to_date)
+        .or_else(|| {
+            price_obj
+                .and_then(|p| p.get("startDate"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.chars().take(10).collect::<String>())
+        });
+    let valid_until = data
+        .get("storeEndDate")
+        .and_then(|v| v.as_i64())
+        .and_then(epoch_to_date)
+        .or_else(|| {
+            price_obj
+                .and_then(|p| p.get("endDate"))
+                .and_then(|v| v.as_str())
+                .or_else(|| data.get("storeEndDate").and_then(|v| v.as_str()))
+                .map(|s| s.chars().take(10).collect::<String>())
+        });
 
     let images: Vec<String> = data
         .get("image")
@@ -197,6 +215,16 @@ pub fn parse_tile(item: &serde_json::Value, market_id: &str) -> Option<Offer> {
         biozid: false,
         flyer_page: None,
     })
+}
+
+// Unix-Sekunden -> "YYYY-MM-DD" in Europe/Berlin (die Epochen sind lokale
+// Mitternacht bzw. 23:59:59 — UTC-Datum wäre in der Sommerzeit der Vortag).
+fn epoch_to_date(secs: i64) -> Option<String> {
+    use chrono::TimeZone;
+    chrono_tz::Europe::Berlin
+        .timestamp_opt(secs, 0)
+        .single()
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
 }
 
 // main() ist synchron — eigener Runtime wie in penny.rs.

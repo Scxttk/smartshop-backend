@@ -267,6 +267,37 @@ fn lidl_fixture_parses_all_tiles() {
     assert_eq!(prosecco.price, Some(3.49));
 }
 
+// Regression: Seit Juli 2026 liefert die Such-API kein price.startDate mehr —
+// die Filial-Gültigkeit steht als Unix-Sekunden in storeStartDate/storeEndDate
+// (Europe/Berlin). Vor dem Fix kamen alle Lidl-Angebote mit valid_from = NULL
+// an; die App filtert die serverseitig weg und der Upsert-Schlüssel
+// (market, product, valid_from, region) duplizierte sie bei jedem Lauf.
+#[test]
+fn lidl_branch_fixture_yields_validity_dates_from_epoch_fields() {
+    let raw: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/lidl/search_store_branch.json")).unwrap();
+    let items = raw["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+
+    let offers: Vec<_> = items
+        .iter()
+        .filter_map(|it| scrapers::lidl::parse_tile(it, "LIDL_5745"))
+        .collect();
+    assert_eq!(offers.len(), 3);
+
+    let pizza = &offers[0];
+    assert_eq!(pizza.title, "SILVERCREST® Pizzateig-Boxen, 4 Stück");
+    assert_eq!(pizza.price, Some(9.99));
+    // 1784152800 = 2026-07-16 00:00 Europe/Berlin, 1784411999 = 2026-07-18 23:59:59
+    assert_eq!(pizza.valid_from.as_deref(), Some("2026-07-16"));
+    assert_eq!(pizza.valid_until.as_deref(), Some("2026-07-18"));
+
+    for o in &offers {
+        assert!(o.valid_from.is_some(), "valid_from fehlt bei {}", o.title);
+        assert!(o.valid_until.is_some(), "valid_until fehlt bei {}", o.title);
+    }
+}
+
 // Regression: Lidl-Plus-exklusive Angebote haben in data.price nur eine leere
 // Hülle — der Preis steht in data.lidlPlus[0].price. Vor dem Fix kamen diese
 // ~7 Angebote pro Woche mit price = NULL an.
