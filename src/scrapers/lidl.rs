@@ -250,10 +250,15 @@ mod tests {
         println!("{} Angebote", offers.len());
         for o in offers.iter().take(5) {
             println!(
-                "- {} | {:?} | {:?} € (statt {:?}) | {:?} | bis {:?}",
-                o.title, o.subtitle, o.price, o.regular_price, o.category, o.valid_until
+                "- {} | {:?} | {:?} € (statt {:?}) | {:?} | {:?} bis {:?}",
+                o.title, o.subtitle, o.price, o.regular_price, o.category, o.valid_from, o.valid_until
             );
         }
         assert!(offers.len() >= 100, "Erwartet dreistellige Angebotszahl, war {}", offers.len());
+        // Dauersortiment (z. B. Wein) trägt gar kein Datum und wird beim Push
+        // gefiltert — aber die Wochenangebote müssen valid_from haben.
+        let dated = offers.iter().filter(|o| o.valid_from.is_some()).count();
+        println!("{dated}/{} Angebote mit valid_from", offers.len());
+        assert!(dated >= 100, "Erwartet dreistellig viele datierte Angebote, war {dated}");
     }
 }
