@@ -3,8 +3,18 @@ use serde::Deserialize;
 
 use crate::db;
 use crate::models::{Market, Offer};
-use crate::push::{self, PushConfig, PushOptions};
+use crate::push::{self, PushConfig, PushOptions, SupabaseRow};
 use crate::stores::save_offers;
+
+/// Ketten mit bundesweit identischem Angebotskatalog: deren Angebote können
+/// beim On-Demand-Sync aus einer bereits gesyncten Region kopiert werden,
+/// bevor irgendein Scraper läuft.
+pub const NATIONAL_CHAINS: [&str; 3] = ["Lidl", "ALDI Nord", "ALDI SÜD"];
+
+/// Filial-Lookup für nationale Ketten: (Ketten-Anzeigename, PLZ) ->
+/// Ok(Some(Filiale)), Ok(None) = keine Filiale im Umkreis, Err = Finder kaputt.
+/// In Produktion die find_market-Funktionen der Scraper; in Tests ein Stub.
+pub type BranchFinder<'a> = dyn Fn(&str, &str) -> Result<Option<Market>> + 'a;
 
 /// Ergebnis des Scrapens einer Region: pro Kette (Anzeigename wie in
 /// `Store::chain()`) Markt + Angebote, `Ok(None)` wenn die Kette laut
@@ -97,10 +107,143 @@ fn upsert_markets(cfg: &PushConfig, rows: &[serde_json::Value]) -> Result<()> {
     check_response(&format!("Upsert von {} Märkten", rows.len()), resp)
 }
 
+/// Angebote der nationalen Ketten aus vorhandenen Supabase-Daten in eine neue
+/// Region kopieren — noch bevor irgendein Scraper läuft. Pro Kette:
+///
+/// 1. Filialcheck VORAB über den Store-Finder (statt Kopieren + späterem
+///    Cleanup): ohne Filiale gäbe es keine markets-Zeile und die kopierten
+///    Angebote wären für die App unsichtbar, aber niemand würde sie je wieder
+///    aufräumen — der Push löscht nur Wochen von Ketten, die er selbst pusht.
+///    Der Check kostet ~2 Requests pro Kette und vermeidet dieses Leck.
+///    Finder-Fehler überspringen die Kette nur (kein Kopieren, kein Abbruch) —
+///    der reguläre Scrape direkt danach hat seinen eigenen Fallback.
+/// 2. Neueste noch gültige Woche der Kette in irgendeiner Region suchen und
+///    deren Zeilen mit region=<PLZ> upserten (gleicher Konfliktschlüssel wie
+///    der Push — der spätere Scrape derselben Woche merged einfach darüber).
+/// 3. Die gefundene Filiale nach `public.markets` melden, damit die App die
+///    Kette sofort anzeigt.
+///
+/// Liefert die Zahl kopierter Angebote; Fehler einzelner Ketten warnen nur.
+pub fn seed_national_chains(cfg: &PushConfig, finder: &BranchFinder, plz: &str) -> usize {
+    let mut total = 0usize;
+    for chain in NATIONAL_CHAINS {
+        match seed_chain(cfg, finder, chain, plz) {
+            Ok(n) => {
+                if n > 0 {
+                    println!("[{plz}] {chain}: {n} Angebote aus vorhandener Region kopiert.");
+                }
+                total += n;
+            }
+            Err(e) => eprintln!("WARNUNG [{plz}] {chain}: Vorab-Kopie fehlgeschlagen: {e:#}"),
+        }
+    }
+    total
+}
+
+fn seed_chain(cfg: &PushConfig, finder: &BranchFinder, chain: &str, plz: &str) -> Result<usize> {
+    // Eigener, kurzlebiger Client wie in den übrigen Supabase-Helfern hier —
+    // upsert_markets unten baut seine eigene Verbindung auf.
+    let client = reqwest::blocking::Client::new();
+    let market = match finder(chain, plz) {
+        Ok(Some(m)) => m,
+        Ok(None) => {
+            println!("[{plz}] {chain}: keine Filiale in der Nähe — Vorab-Kopie übersprungen.");
+            return Ok(0);
+        }
+        Err(e) => {
+            eprintln!("WARNUNG [{plz}] {chain}: Filialsuche fehlgeschlagen ({e:#}) — Vorab-Kopie übersprungen.");
+            return Ok(0);
+        }
+    };
+
+    // Neueste noch gültige Woche der Kette in irgendeiner Region finden.
+    let offers_url = format!("{}/rest/v1/offers", cfg.base_url);
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let resp = auth(cfg, client.get(&offers_url))
+        .query(&[
+            ("select", "valid_from,region"),
+            ("market", &format!("eq.{chain}")),
+            ("valid_until", &format!("gte.{today}")),
+            ("order", "valid_from.desc"),
+            ("limit", "1"),
+        ])
+        .send()
+        .with_context(|| format!("Supabase nicht erreichbar ({})", cfg.base_url))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        bail!("Wochen-Suche fehlgeschlagen (HTTP {status})");
+    }
+    let probe: Vec<serde_json::Value> =
+        resp.json().context("Wochen-Suche: Antwort ist kein gültiges JSON")?;
+    let Some(hit) = probe.first() else {
+        println!("[{plz}] {chain}: keine gültigen Angebote in anderen Regionen — nichts zu kopieren.");
+        return Ok(0);
+    };
+    let valid_from = hit
+        .get("valid_from")
+        .and_then(|v| v.as_str())
+        .context("Wochen-Suche: valid_from fehlt")?
+        .to_string();
+    let source_region = hit.get("region").and_then(|v| v.as_str()).map(String::from);
+    if source_region.as_deref() == Some(plz) {
+        return Ok(0);
+    }
+
+    // Alle Zeilen der Quell-Woche laden und mit region=<PLZ> upserten.
+    let region_filter = match &source_region {
+        Some(r) => ("region", format!("eq.{r}")),
+        None => ("region", "is.null".to_string()),
+    };
+    let resp = auth(cfg, client.get(&offers_url))
+        .query(&[
+            ("market", &format!("eq.{chain}")),
+            ("valid_from", &format!("eq.{valid_from}")),
+            (region_filter.0, &region_filter.1),
+        ])
+        .send()
+        .with_context(|| format!("Supabase nicht erreichbar ({})", cfg.base_url))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        bail!("Quell-Angebote laden fehlgeschlagen (HTTP {status})");
+    }
+    let mut rows: Vec<SupabaseRow> =
+        resp.json().context("Quell-Angebote: Antwort passt nicht zum offers-Schema")?;
+    for row in &mut rows {
+        row.region = Some(plz.to_string());
+    }
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    push::upsert_offer_rows(&client, cfg, &rows, &format!("[{chain}] Vorab-Kopie"))?;
+    drop(client);
+
+    // Filiale melden, damit die App die Kette sofort anzeigt; der reguläre
+    // Scrape upsertet dieselbe Zeile später einfach erneut.
+    upsert_markets(
+        cfg,
+        &[serde_json::json!({
+            "chain": chain,
+            "branch_name": market.name,
+            "market_id": market.id,
+            "plz": plz,
+            "lat": market.lat,
+            "lon": market.lon,
+            "updated_at": chrono::Utc::now().to_rfc3339(),
+        })],
+    )?;
+    Ok(rows.len())
+}
+
 /// Eine Region komplett syncen: Ketten scrapen, Märkte upserten, Angebote
 /// pushen. Die lokale offers-Tabelle wird vorher geleert, damit `push` nur
 /// Angebote dieser Region hochlädt.
-fn sync_region(opts: &SyncOptions, cfg: &PushConfig, fetcher: &Fetcher, plz: &str) -> Result<()> {
+fn sync_region(
+    opts: &SyncOptions,
+    cfg: &PushConfig,
+    fetcher: &Fetcher,
+    plz: &str,
+    defer_mirror: bool,
+) -> Result<()> {
     {
         let conn = db::open(&opts.db_path)?;
         conn.execute("DELETE FROM offers", [])
@@ -195,6 +338,7 @@ fn sync_region(opts: &SyncOptions, cfg: &PushConfig, fetcher: &Fetcher, plz: &st
             region: Some(plz.to_string()),
             dry_run: opts.dry_run,
             mirror_images: true,
+            defer_mirror,
         },
         Some(cfg),
     )
@@ -215,8 +359,15 @@ fn register_region(cfg: &PushConfig, plz: &str) -> Result<()> {
 
 /// Alle aktiven Regionen aus Supabase syncen. Fehler einzelner Regionen
 /// brechen den Lauf nicht ab; Exit-Fehler nur, wenn ALLE Regionen scheitern.
-/// Mit `only` wird genau eine PLZ gesynct (und vorher registriert).
-pub fn run(opts: &SyncOptions, cfg: Option<&PushConfig>, fetcher: &Fetcher) -> Result<()> {
+/// Mit `only` wird genau eine PLZ gesynct (und vorher registriert): dort
+/// zählt Sekunden bis zur ersten Anzeige — nationale Ketten werden vorab aus
+/// vorhandenen Daten kopiert und Bilder erst nach dem Offers-Upsert gespiegelt.
+pub fn run(
+    opts: &SyncOptions,
+    cfg: Option<&PushConfig>,
+    fetcher: &Fetcher,
+    finder: &BranchFinder,
+) -> Result<()> {
     let cfg = match cfg {
         Some(c) => c,
         None => &push::config_from_env()?,
@@ -225,9 +376,10 @@ pub fn run(opts: &SyncOptions, cfg: Option<&PushConfig>, fetcher: &Fetcher) -> R
     if let Some(plz) = &opts.only {
         if !opts.dry_run {
             register_region(cfg, plz)?;
+            seed_national_chains(cfg, finder, plz);
         }
         println!("On-Demand-Sync: nur Region {plz}");
-        return sync_region(opts, cfg, fetcher, plz)
+        return sync_region(opts, cfg, fetcher, plz, true)
             .with_context(|| format!("Region {plz} fehlgeschlagen"));
     }
 
@@ -259,7 +411,7 @@ pub fn run(opts: &SyncOptions, cfg: Option<&PushConfig>, fetcher: &Fetcher) -> R
     let mut failures: Vec<(String, String)> = Vec::new();
     for region in selected {
         println!("\n=== Region {} ===", region.plz);
-        if let Err(e) = sync_region(opts, cfg, fetcher, &region.plz) {
+        if let Err(e) = sync_region(opts, cfg, fetcher, &region.plz, false) {
             eprintln!("Region {} fehlgeschlagen: {e:#}", region.plz);
             failures.push((region.plz.clone(), format!("{e:#}")));
         }

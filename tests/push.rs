@@ -320,6 +320,7 @@ fn run_push(db_path: &str, base_url: &str) -> anyhow::Result<()> {
         region: Some("01219".to_string()),
         dry_run: false,
         mirror_images: false,
+        defer_mirror: false,
     };
     let cfg = PushConfig { base_url: base_url.to_string(), api_key: "test-key".to_string() };
     push::run(&opts, Some(&cfg))
@@ -450,7 +451,7 @@ fn push_fails_with_german_error_on_http_error() {
 fn push_requires_region_unless_dry_run() {
     let db_path = temp_db("region");
     seed_db(&db_path, 1);
-    let opts = PushOptions { db_path, chain: None, region: None, dry_run: false, mirror_images: false };
+    let opts = PushOptions { db_path, chain: None, region: None, dry_run: false, mirror_images: false, defer_mirror: false };
     let err = push::run(&opts, None).unwrap_err().to_string();
     assert!(err.contains("--region"), "{err}");
 }
@@ -460,7 +461,7 @@ fn dry_run_makes_no_requests() {
     let db_path = temp_db("dry");
     seed_db(&db_path, 3);
     let (_base_url, log) = spawn_mock();
-    let opts = PushOptions { db_path, chain: None, region: None, dry_run: true, mirror_images: true };
+    let opts = PushOptions { db_path, chain: None, region: None, dry_run: true, mirror_images: true, defer_mirror: false };
     // cfg: None — Dry-Run braucht weder Env noch Netzwerk (auch nicht fürs Spiegeln)
     push::run(&opts, None).unwrap();
     assert!(log.lock().unwrap().is_empty());
@@ -489,6 +490,7 @@ fn push_mirrors_images_and_caches_them() {
         region: Some("01219".to_string()),
         dry_run: false,
         mirror_images: true,
+        defer_mirror: false,
     };
 
     // Erster Lauf: Bild laden und in den Bucket hochladen.
@@ -547,6 +549,7 @@ fn chain_filter_limits_push() {
         region: Some("01219".to_string()),
         dry_run: false,
         mirror_images: false,
+        defer_mirror: false,
     };
     let cfg = PushConfig { base_url, api_key: "k".to_string() };
     push::run(&opts, Some(&cfg)).unwrap();
@@ -718,5 +721,76 @@ fn history_failure_does_not_fail_push() {
     assert!(
         reqs.iter().any(|r| r.method == "POST" && r.target.starts_with("/rest/v1/regions")),
         "{reqs:#?}"
+    );
+}
+
+// ------------------------------------------------- Zwei-Phasen-Push (defer)
+
+// On-Demand-Pfad: Phase 1 upsertet sofort mit der Händler-URL, erst danach
+// werden Bilder gespiegelt und die Zeilen mit Bucket-URLs nachgetragen.
+#[test]
+fn deferred_mirror_upserts_offers_before_mirroring() {
+    let db_path = temp_db("defer");
+    let (base_url, log) = spawn_mock();
+
+    let _ = std::fs::remove_file(&db_path);
+    let conn = db::open(&db_path).unwrap();
+    db::upsert_market(&conn, &Market::new("m1", "REWE Christian Koehler oHG")).unwrap();
+    let mut o = offer("Gouda", Some(1.99));
+    o.images = vec![format!("{base_url}/img/gouda.jpg")];
+    db::upsert_offer(&conn, &o).unwrap();
+    drop(conn);
+
+    let cfg = PushConfig { base_url: base_url.clone(), api_key: "k".to_string() };
+    let opts = PushOptions {
+        db_path,
+        chain: None,
+        region: Some("01219".to_string()),
+        dry_run: false,
+        mirror_images: true,
+        defer_mirror: true,
+    };
+    push::run(&opts, Some(&cfg)).unwrap();
+
+    let reqs = log.lock().unwrap().clone();
+    let pos = |pred: &dyn Fn(&Req) -> bool| reqs.iter().position(|r| pred(r));
+
+    // Phase 1: erster Offers-Upsert trägt die Händler-URL (kein Bucket).
+    let first_upsert = pos(&|r: &Req| {
+        r.method == "POST" && r.target.starts_with("/rest/v1/offers")
+    })
+    .expect("Offers-Upsert fehlt");
+    assert!(
+        reqs[first_upsert].body.contains("/img/gouda.jpg")
+            && !reqs[first_upsert].body.contains("/storage/v1/object/public/"),
+        "Phase 1 muss die Händler-URL upserten: {}",
+        reqs[first_upsert].body
+    );
+
+    // Bild-Download und Storage-Upload kommen erst NACH dem ersten Upsert.
+    let download = pos(&|r: &Req| r.method == "GET" && r.target == "/img/gouda.jpg")
+        .expect("Bild-Download fehlt");
+    let upload = pos(&|r: &Req| {
+        r.method == "POST" && r.target.starts_with("/storage/v1/object/offer-images/")
+    })
+    .expect("Storage-Upload fehlt");
+    assert!(first_upsert < download && download < upload, "Reihenfolge: {reqs:#?}");
+
+    // Phase 2: Nachtrag-Upsert mit Bucket-URL und regulärem Konfliktschlüssel.
+    let patch = reqs
+        .iter()
+        .skip(upload)
+        .find(|r| r.method == "POST" && r.target.starts_with("/rest/v1/offers"))
+        .expect("Bild-Nachtrag-Upsert fehlt");
+    assert!(
+        patch.body.contains("/storage/v1/object/public/offer-images/"),
+        "Phase 2 muss die Bucket-URL nachtragen: {}",
+        patch.body
+    );
+    assert!(
+        patch.target.contains("on_conflict=market%2Cproduct%2Cvalid_from%2Cregion")
+            || patch.target.contains("on_conflict=market,product,valid_from,region"),
+        "{}",
+        patch.target
     );
 }

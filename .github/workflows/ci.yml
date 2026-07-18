@@ -24,3 +24,17 @@ jobs:
       # (kein --include-ignored / --ignored verwenden).
       - name: cargo test (offline only)
         run: cargo test
+
+      # Release-Binary als Artefakt für die On-Demand-Läufe in nightly.yml —
+      # die laden es statt selbst ~6 min zu bauen.
+      - name: Build release binary
+        if: github.ref == 'refs/heads/master'
+        run: cargo build --release
+
+      - name: Upload release binary
+        if: github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartshop-linux-x86_64
+          path: target/release/smartshop
+          retention-days: 14
