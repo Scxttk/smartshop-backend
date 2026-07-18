@@ -16,7 +16,9 @@ env:
 jobs:
   nightly:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 6+ Regionen mit Bild-Spiegelung + Rust-Build brauchen deutlich mehr als
+    # 45 min — die Läufe vom 18.07. wurden bei 45 min abgebrochen.
+    timeout-minutes: 150
     env:
       SMARTSHOP_ZIP: ${{ vars.SMARTSHOP_ZIP }}
       # `secrets` ist in Step-`if` nicht erlaubt — Verfügbarkeit hier als Env-Flag.
