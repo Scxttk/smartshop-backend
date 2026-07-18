@@ -11,8 +11,34 @@ use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
 use crate::push::PushConfig;
+use crate::scrapers::util;
 
 pub const BUCKET: &str = "offer-images";
+
+/// Bild-CDNs, die hinter Akamai liegen und reqwest/rustls mit 403 blocken.
+/// Solche Bilder müssen — wie schon die HTML-Seiten der Ketten — über
+/// System-curl mit einer aufgewärmten Cookie-Session geladen werden. Liefert
+/// (Warm-up-URL, Warm-up-Header), sonst None (Standard-reqwest-Pfad).
+///
+/// Der Netto-Warm-up braucht eine gerenderte Filialangebote-Seite (HTTP 200);
+/// eine beliebige gültige Filiale genügt, darum ist die Store-ID fix — sie
+/// dient nur dazu, dass Akamai gültige Session-Cookies ausstellt.
+fn akamai_image_warmup(url: &str) -> Option<(&'static str, &'static [(&'static str, &'static str)])> {
+    if url.contains("netto-online.de") {
+        Some((
+            "https://www.netto-online.de/filialangebote/1",
+            &[
+                ("Cookie", "netto_user_stores_id=4816"),
+                ("Sec-Fetch-Site", "none"),
+                ("Sec-Fetch-Mode", "navigate"),
+                ("Sec-Fetch-Dest", "document"),
+                ("Sec-Fetch-User", "?1"),
+            ],
+        ))
+    } else {
+        None
+    }
+}
 
 /// Deterministischer Objektpfad: sha256(Quell-URL) + Datei-Endung der Quelle.
 pub fn object_path(source_url: &str) -> String {
@@ -52,21 +78,46 @@ pub fn mirror(
 ) -> Result<String> {
     let path = object_path(source_url);
 
-    // Bild vom Händler-CDN laden.
-    let resp = client
-        .get(source_url)
-        .send()
-        .with_context(|| format!("Bild-Download fehlgeschlagen: {source_url}"))?;
-    if !resp.status().is_success() {
-        bail!("Bild-Download {source_url}: HTTP {}", resp.status());
-    }
-    let content_type = resp
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("image/jpeg")
-        .to_string();
-    let bytes = resp.bytes().context("Bild-Bytes lesen fehlgeschlagen")?;
+    // Bild vom Händler-CDN laden. Akamai-geschützte Hosts (Netto) blocken
+    // reqwest mit 403 — die gehen über System-curl mit Cookie-Session.
+    let (bytes, content_type) = match akamai_image_warmup(source_url) {
+        Some((warmup_url, warmup_headers)) => {
+            let img_headers: [(&str, &str); 5] = [
+                ("Accept", "image/avif,image/webp,image/apng,*/*"),
+                ("Referer", warmup_url),
+                ("Sec-Fetch-Site", "same-origin"),
+                ("Sec-Fetch-Mode", "no-cors"),
+                ("Sec-Fetch-Dest", "image"),
+            ];
+            let (bytes, content_type) = util::curl_get_bytes(
+                source_url,
+                &img_headers,
+                Some((warmup_url, warmup_headers)),
+            )
+            .with_context(|| format!("Bild-Download fehlgeschlagen: {source_url}"))?;
+            (bytes, content_type)
+        }
+        None => {
+            let resp = client
+                .get(source_url)
+                .send()
+                .with_context(|| format!("Bild-Download fehlgeschlagen: {source_url}"))?;
+            if !resp.status().is_success() {
+                bail!("Bild-Download {source_url}: HTTP {}", resp.status());
+            }
+            let content_type = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("image/jpeg")
+                .to_string();
+            let bytes = resp
+                .bytes()
+                .context("Bild-Bytes lesen fehlgeschlagen")?
+                .to_vec();
+            (bytes, content_type)
+        }
+    };
 
     // In den Bucket hochladen (idempotent via x-upsert).
     let upload_url = format!("{}/storage/v1/object/{BUCKET}/{path}", cfg.base_url);
