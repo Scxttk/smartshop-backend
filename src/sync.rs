@@ -122,6 +122,11 @@ fn sync_region(opts: &SyncOptions, cfg: &PushConfig, fetcher: &Fetcher, plz: &st
             }
             Ok(Some((market, offers))) => {
                 println!("[{plz}] {chain}: {} Angebote gefunden.", offers.len());
+                if offers.is_empty() {
+                    eprintln!(
+                        "WARNUNG [{plz}] {chain}: Scraper lieferte 0 Angebote — Kette bleibt in dieser Region leer."
+                    );
+                }
                 match save_offers(&opts.db_path, &market, &offers) {
                     Ok(()) => {
                         market_rows.push(serde_json::json!({

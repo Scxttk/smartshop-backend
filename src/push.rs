@@ -39,31 +39,34 @@ pub struct SupabaseRow {
 /// Markt-ID und Filialnamen; Filialen ohne erkennbare Kette liefern None und
 /// werden beim Push übersprungen.
 pub fn chain_for(market: &Market) -> Option<&'static str> {
+    use crate::stores::Store;
     let hay = format!("{} {}", market.id, market.name).to_lowercase();
     if hay.contains("aldi") {
         if hay.contains("nord") {
-            return Some("ALDI Nord");
+            return Some(Store::AldiNord.chain());
         }
         if hay.contains("süd") || hay.contains("sued") {
-            return Some("ALDI SÜD");
+            return Some(Store::AldiSued.chain());
         }
     }
+    // Kanonischer Name kommt IMMER aus Store::chain() — `offers.market` muss
+    // exakt zu markets.chain passen, die App filtert mit market=in.(…).
     let chains = [
-        ("rewe", "REWE"),
-        ("penny", "Penny"),
-        ("kaufland", "Kaufland"),
-        ("lidl", "Lidl"),
-        ("netto", "Netto"),
-        ("edeka", "EDEKA"),
+        ("rewe", Store::Rewe.chain()),
+        ("penny", Store::Penny.chain()),
+        ("kaufland", Store::Kaufland.chain()),
+        ("lidl", Store::Lidl.chain()),
+        ("netto", Store::Netto.chain()),
+        ("edeka", Store::Edeka.chain()),
         // EDEKA-Vertriebsmarken tragen "edeka" nicht immer im Namen
-        ("e center", "EDEKA"),
-        ("e-center", "EDEKA"),
-        ("e neukauf", "EDEKA"),
-        ("e aktiv", "EDEKA"),
-        ("e xpress", "EDEKA"),
-        ("marktkauf", "EDEKA"),
-        ("nah & gut", "EDEKA"),
-        ("nah und gut", "EDEKA"),
+        ("e center", Store::Edeka.chain()),
+        ("e-center", Store::Edeka.chain()),
+        ("e neukauf", Store::Edeka.chain()),
+        ("e aktiv", Store::Edeka.chain()),
+        ("e xpress", Store::Edeka.chain()),
+        ("marktkauf", Store::Edeka.chain()),
+        ("nah & gut", Store::Edeka.chain()),
+        ("nah und gut", Store::Edeka.chain()),
     ];
     chains.iter().find(|(n, _)| hay.contains(n)).map(|(_, c)| *c)
 }
@@ -405,7 +408,10 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
     for (chain, g) in &groups {
         let rows = &g.rows;
         if rows.is_empty() {
-            println!("  [{chain}] Keine hochladbaren Angebote ({}).", skipped_note(g));
+            eprintln!(
+                "WARNUNG [{chain}] 0 Angebote hochladbar ({}) — Kette bleibt in dieser Region leer.",
+                skipped_note(g)
+            );
             continue;
         }
 

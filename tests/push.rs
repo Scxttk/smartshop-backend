@@ -174,6 +174,23 @@ fn chain_detection_from_market() {
 }
 
 #[test]
+fn chain_for_matches_store_chain_for_every_store() {
+    // markets.chain (sync: Store::chain()) und offers.market (push: chain_for)
+    // müssen exakt denselben String tragen — die App filtert mit market=in.(…)
+    // aus der markets-Tabelle, jede Abweichung macht Angebote unsichtbar.
+    use smartshop::stores::Store;
+    for store in Store::ALL {
+        let canonical = store.chain();
+        let market = Market::new(canonical, &format!("{canonical} Testfiliale"));
+        assert_eq!(
+            chain_for(&market),
+            Some(canonical),
+            "chain_for weicht für {canonical} von Store::chain() ab"
+        );
+    }
+}
+
+#[test]
 fn base_price_units_module_roundtrip() {
     // Absicherung, dass push dieselbe Ableitung nutzt wie compare/suggest
     let up = units::derive_unit_price(Some(0.99), &[Some("je 500-g-Packg.")]).unwrap();
