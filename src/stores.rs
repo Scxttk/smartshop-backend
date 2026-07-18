@@ -56,25 +56,21 @@ impl Store {
     }
 }
 
-/// Angebotsquelle für Lidl. Standard ist der marktguru-Scraper (`lidl.rs`);
-/// mit `LIDL_SOURCE=prospekt` (auch `flyer`/`llm`) schaltet der Lauf auf die
-/// LLM-Prospekt-Pipeline (`lidl_prospekt.rs`) um.
+/// Angebotsquelle für Lidl. **Standard ist die LLM-Prospekt-Pipeline**
+/// (`lidl_prospekt.rs`), die die echten Filial-Wochenangebote (Frische,
+/// Fleisch, Molkerei, Backshop) direkt aus dem offiziellen Prospekt liest —
+/// die einzige Quelle, die diese strukturiert liefert. Der marktguru-Scraper
+/// (`lidl.rs`) ist nur noch Notausgang und wird mit `LIDL_SOURCE=marktguru`
+/// (auch `mg`) erzwungen (z. B. wenn kein GITHUB_MODELS_TOKEN gesetzt ist).
 ///
-/// Bewusst ein Runtime-Schalter statt eines Cargo-Features:
-///   * Derselbe Build kann beide Quellen fahren — nötig für den direkten
-///     Vergleichslauf (PLZ 01219, marktguru vs. Prospekt) und für ein
-///     späteres Nightly-A/B, ohne zwei Binaries zu pflegen.
-///   * Der teure Vision-Pfad (GitHub-Models-Token, Rate-Limit, Kosten) läuft
-///     nur bei explizitem Opt-in; ohne die Env bleibt alles unverändert.
-///   * Der Schalter greift an genau einer Stelle (`scrape_store`) und wirkt
-///     dadurch automatisch in `fetch`, `fetch_all` und im Sync-Fetcher.
-///
-/// Ein Cargo-Feature würde dagegen die Quelle zur Compile-Zeit festnageln und
-/// A/B unmöglich machen.
+/// Runtime-Schalter statt Cargo-Feature, damit derselbe Build beide Quellen
+/// fahren kann (Fallback, Vergleich) und der Schalter an genau einer Stelle
+/// (`scrape_store`) greift — automatisch in `fetch`, `fetch_all` und im
+/// Sync-Fetcher.
 fn lidl_use_prospekt() -> bool {
-    matches!(
+    !matches!(
         std::env::var("LIDL_SOURCE").ok().as_deref(),
-        Some("prospekt") | Some("flyer") | Some("llm")
+        Some("marktguru") | Some("mg")
     )
 }
 
@@ -85,7 +81,7 @@ fn lidl_prospekt_max_pages() -> usize {
     std::env::var("LIDL_PROSPEKT_MAX_PAGES")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(12)
+        .unwrap_or(30)
 }
 
 /// None: die Kette hat laut Store-Finder keine Filiale im Umkreis der PLZ

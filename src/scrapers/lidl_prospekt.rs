@@ -40,8 +40,10 @@ const TOKEN_ENV: &str = "GITHUB_MODELS_TOKEN";
 
 // Free-Tier-Rate-Limit: 15 Req/min. Zwischen Vision-Calls throtteln.
 const CALL_PAUSE_SECS: u64 = 4;
-// Obergrenze an Vision-Calls pro Lauf (Kosten/Rate-Limit-Schutz).
-const DEFAULT_MAX_PAGES: usize = 12;
+// Harte Obergrenze an Vision-Calls pro Lauf (Rate-Limit-/Kostenschutz). Ein
+// kompletter Wochenprospekt hat ~18 Angebotsseiten nach Vorfilter; 30 lässt
+// Luft nach oben, damit "so vollständig wie möglich" nicht am Cap scheitert.
+const DEFAULT_MAX_PAGES: usize = 30;
 
 /// Echte Filiale über den Store-Finder; None, wenn es im Umkreis der PLZ keine
 /// Lidl-Filiale gibt. Identisch zu lidl.rs — die Präsenzprüfung ist dieselbe.
@@ -90,7 +92,7 @@ pub fn fetch_offers(market: &Market, zip: &str, max_pages: usize) -> Result<Vec<
         // 4./5./6. Bild laden -> Vision -> Offers mit injizierten Daten.
         let mut offers = Vec::new();
         for (idx, page) in &pages {
-            let bytes = download_image(&client, &page.image).await?;
+            let bytes = download_image(&client, page.best_image()).await?;
             let raws = match vision_extract(&client, &token, &bytes).await {
                 Ok(r) => r,
                 Err(e) => {
@@ -296,10 +298,22 @@ impl Flyer {
 pub struct Page {
     #[serde(default)]
     pub image: String,
+    /// Hochauflösende Variante (2400px) desselben Seitenbilds; deutlich mehr
+    /// Detail für die Vision-Extraktion (Kleingedrucktes, Grundpreise).
+    #[serde(default)]
+    pub zoom: String,
     #[serde(default, rename = "keyWords")]
     pub key_words: String,
     #[serde(default, rename = "altText")]
     pub alt_text: String,
+}
+
+impl Page {
+    /// Beste verfügbare Bild-URL: bevorzugt `zoom` (2400px), sonst `image`
+    /// (1200px). Für die Vision-Extraktion zählt maximale Auflösung.
+    pub fn best_image(&self) -> &str {
+        if !self.zoom.is_empty() { &self.zoom } else { &self.image }
+    }
 }
 
 /// Flyer-JSON parsen. Die Nutzdaten liegen unter dem Top-Level-Key `flyer`.
@@ -366,7 +380,7 @@ pub fn is_offer_page(page: &Page) -> bool {
     if EXCLUDE_MARKERS.iter().any(|m| alt.contains(m)) {
         return false;
     }
-    INCLUDE_MARKERS.iter().any(|m| alt.contains(m)) && !page.image.is_empty()
+    INCLUDE_MARKERS.iter().any(|m| alt.contains(m)) && !page.best_image().is_empty()
 }
 
 /// Gefilterte Angebotsseiten in Lesereihenfolge (0-basierter Seitenindex),
