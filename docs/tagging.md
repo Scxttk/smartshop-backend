@@ -31,13 +31,15 @@ select market, product, valid_from, region
 from public.offers
 where match_key = '{}'
   and valid_until >= current_date
+  and region = '01219'          -- ohne Region-Filter tauchen alte,
+                                -- noch untagged Kopien anderer Regionen auf
 order by market, product;
 ```
 
 Per PostgREST/curl:
 
 ```sh
-curl -s "$SUPABASE_URL/rest/v1/offers?match_key=eq.\{\}&valid_until=gte.$(date +%F)&select=market,product,valid_from,region" \
+curl -s "$SUPABASE_URL/rest/v1/offers?match_key=eq.\{\}&valid_until=gte.$(date +%F)&region=eq.01219&select=market,product,valid_from,region" \
   -H "apikey: $SUPABASE_SERVICE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_KEY"
 ```
 
