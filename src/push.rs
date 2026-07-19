@@ -33,6 +33,12 @@ pub struct SupabaseRow {
     pub ean: Option<String>,
     pub source: String,
     pub region: Option<String>,
+    /// Begriffs-Tags aus matching.rs (migration_v10); ["nonfood"] = Non-Food,
+    /// leer = ungetaggt (Kandidat für die Review-Liste). default: die
+    /// Region-Kopie in sync.rs liest Bestandszeilen, die vor der Migration
+    /// gepusht wurden und das Feld noch nicht tragen.
+    #[serde(default)]
+    pub match_key: Vec<String>,
 }
 
 /// Ketten-Anzeigename für einen gespeicherten Markt. Die Zuordnung läuft über
@@ -136,6 +142,11 @@ pub fn map_offer(offer: &Offer, chain: &str, region: Option<&str>) -> Option<Sup
         ean: None,
         source: "smartshop-rust".to_string(),
         region: region.map(String::from),
+        match_key: crate::matching::match_keys(
+            &offer.title,
+            offer.subtitle.as_deref(),
+            offer.category.as_deref(),
+        ),
     })
 }
 

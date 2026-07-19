@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 reqwest = { version = "0.12", features = ["rustls-tls", "json", "blocking"], default-features = false }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: der Marken-Fallback in matching.rs nimmt den ERSTEN Treffer
+# in Wörterbuch-Reihenfolge — sortierte Maps würden andere Tags liefern.
+serde_json = { version = "1", features = ["preserve_order"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }

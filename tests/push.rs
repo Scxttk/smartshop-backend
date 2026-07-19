@@ -402,6 +402,10 @@ fn parse_rows(body: &str) -> Vec<SupabaseRow> {
             ean: None,
             source: r["source"].as_str().unwrap().to_string(),
             region: r["region"].as_str().map(String::from),
+            match_key: r["match_key"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|s| s.as_str()).map(String::from).collect())
+                .unwrap_or_default(),
         })
         .collect()
 }

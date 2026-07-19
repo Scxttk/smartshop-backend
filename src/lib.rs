@@ -1,6 +1,7 @@
 pub mod api;
 pub mod db;
 pub mod enrich;
+pub mod matching;
 pub mod models;
 pub mod push;
 pub mod scrapers;
