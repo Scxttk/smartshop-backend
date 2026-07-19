@@ -1,0 +1,1702 @@
+{
+ "begriffe": {
+  "brot": {
+   "exact": [
+    "brot",
+    "broetchen",
+    "brötchen",
+    "toast",
+    "baguette",
+    "ciabatta",
+    "croutons"
+   ],
+   "suffix": [
+    "brot",
+    "broetchen",
+    "brötchen",
+    "toast"
+   ],
+   "block": [
+    "brotaufstrich",
+    "aufbackbrötchen?"
+   ]
+  },
+  "milch": {
+   "exact": [
+    "milch",
+    "frischmilch",
+    "vollmilch",
+    "buttermilch",
+    "mandeldrink",
+    "haferdrink",
+    "sojadrink"
+   ],
+   "suffix": [
+    "milch"
+   ],
+   "block": [
+    "milchreis",
+    "milchschnitte",
+    "milchbrötchen",
+    "kokosmilch",
+    "milcheis",
+    "milchschokolade"
+   ]
+  },
+  "butter": {
+   "exact": [
+    "butter",
+    "markenbutter",
+    "kräuterbutter"
+   ],
+   "suffix": [],
+   "block": [
+    "butterkäse",
+    "buttergemüse",
+    "erdnussbutter",
+    "buttermilch",
+    "butterkeks"
+   ]
+  },
+  "käse": {
+   "exact": [
+    "käse",
+    "kaese",
+    "käsescheiben",
+    "käsesnack",
+    "cottage",
+    "gouda",
+    "emmentaler",
+    "edamer",
+    "maasdamer",
+    "bergkäse",
+    "butterkäse",
+    "cheddar",
+    "parmesan",
+    "grana",
+    "halloumi",
+    "tilsiter",
+    "camembert",
+    "käsestangen",
+    "schmelzkäse"
+   ],
+   "suffix": [
+    "käse",
+    "kaese"
+   ],
+   "block": [
+    "käsekuchen",
+    "frischkäse"
+   ]
+  },
+  "frischkäse": {
+   "exact": [
+    "frischkäse",
+    "frischkaese"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "mozzarella": {
+   "exact": [
+    "mozzarella"
+   ],
+   "suffix": [
+    "mozzarella"
+   ],
+   "block": []
+  },
+  "feta": {
+   "exact": [
+    "feta",
+    "hirtenkäse",
+    "schafskäse"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "quark": {
+   "exact": [
+    "quark",
+    "speisequark"
+   ],
+   "suffix": [
+    "quark"
+   ],
+   "block": [
+    "quarkbällchen"
+   ]
+  },
+  "joghurt": {
+   "exact": [
+    "joghurt",
+    "jogurt"
+   ],
+   "suffix": [
+    "joghurt",
+    "jogurt",
+    "ghurt"
+   ],
+   "block": []
+  },
+  "sahne": {
+   "exact": [
+    "sahne",
+    "schlagsahne",
+    "schmand",
+    "creme fraiche",
+    "crème fraîche"
+   ],
+   "suffix": [
+    "sahne"
+   ],
+   "block": [
+    "sahnetorte",
+    "sahnebonbon"
+   ]
+  },
+  "eier": {
+   "exact": [
+    "eier",
+    "ei",
+    "freilandeier",
+    "bio-eier"
+   ],
+   "suffix": [
+    "eier"
+   ],
+   "block": [
+    "eierlikör",
+    "eiernudeln",
+    "eierkuchen"
+   ]
+  },
+  "tomaten": {
+   "exact": [
+    "tomate",
+    "tomaten",
+    "rispentomaten",
+    "cherrytomaten",
+    "kirschtomaten",
+    "strauchtomaten",
+    "romatomaten",
+    "cocktailtomaten"
+   ],
+   "suffix": [
+    "tomaten"
+   ],
+   "block": [
+    "tomatenmark",
+    "tomatensoße",
+    "tomatensauce",
+    "tomatenketchup",
+    "tomatensaft",
+    "tomatensuppe"
+   ]
+  },
+  "gurke": {
+   "exact": [
+    "gurke",
+    "gurken",
+    "salatgurke",
+    "salatgurken",
+    "minigurken"
+   ],
+   "suffix": [
+    "gurke",
+    "gurken"
+   ],
+   "block": [
+    "gewürzgurken",
+    "essiggurken",
+    "gurkensticks"
+   ]
+  },
+  "paprika": {
+   "exact": [
+    "paprika",
+    "spitzpaprika"
+   ],
+   "suffix": [
+    "paprika"
+   ],
+   "block": [
+    "paprikachips",
+    "paprikasauce"
+   ]
+  },
+  "salat": {
+   "exact": [
+    "salat",
+    "eisbergsalat",
+    "kopfsalat",
+    "feldsalat",
+    "rucola",
+    "blattsalat",
+    "salatherzen"
+   ],
+   "suffix": [
+    "salat"
+   ],
+   "block": [
+    "salatdressing",
+    "salatsoße",
+    "nudelsalat",
+    "kartoffelsalat",
+    "krautsalat",
+    "fleischsalat",
+    "thunfisch-salat",
+    "salatcreme",
+    "salatmayonnaise"
+   ]
+  },
+  "zwiebeln": {
+   "exact": [
+    "zwiebel",
+    "zwiebeln",
+    "speisezwiebeln",
+    "gemüsezwiebeln",
+    "rote zwiebeln"
+   ],
+   "suffix": [
+    "zwiebeln"
+   ],
+   "block": [
+    "röstzwiebeln",
+    "zwiebelringe",
+    "zwiebelkuchen",
+    "zwiebelmettwurst"
+   ]
+  },
+  "knoblauch": {
+   "exact": [
+    "knoblauch"
+   ],
+   "suffix": [],
+   "block": [
+    "knoblauchbaguette",
+    "knoblauchsauce"
+   ]
+  },
+  "kartoffeln": {
+   "exact": [
+    "kartoffel",
+    "kartoffeln",
+    "speisekartoffeln",
+    "frühkartoffeln"
+   ],
+   "suffix": [
+    "kartoffeln"
+   ],
+   "block": [
+    "kartoffelsalat",
+    "kartoffelchips",
+    "kartoffelknödel",
+    "kartoffelpuffer",
+    "süßkartoffeln",
+    "kartoffelecken"
+   ]
+  },
+  "möhren": {
+   "exact": [
+    "möhre",
+    "möhren",
+    "karotten",
+    "moehren",
+    "bundmöhren"
+   ],
+   "suffix": [
+    "möhren"
+   ],
+   "block": []
+  },
+  "äpfel": {
+   "exact": [
+    "apfel",
+    "äpfel",
+    "aepfel"
+   ],
+   "suffix": [
+    "äpfel"
+   ],
+   "block": [
+    "apfelsaft",
+    "apfelmus",
+    "apfelschorle",
+    "apfelkuchen",
+    "apfelessig",
+    "apfelringe"
+   ]
+  },
+  "bananen": {
+   "exact": [
+    "banane",
+    "bananen"
+   ],
+   "suffix": [],
+   "block": [
+    "bananenmilch"
+   ]
+  },
+  "zitronen": {
+   "exact": [
+    "zitrone",
+    "zitronen",
+    "limetten"
+   ],
+   "suffix": [],
+   "block": [
+    "zitronensaft",
+    "zitronenlimonade"
+   ]
+  },
+  "orangen": {
+   "exact": [
+    "orange",
+    "orangen",
+    "mandarinen",
+    "clementinen"
+   ],
+   "suffix": [],
+   "block": [
+    "orangensaft",
+    "orangenlimonade"
+   ]
+  },
+  "beeren": {
+   "exact": [
+    "erdbeeren",
+    "himbeeren",
+    "blaubeeren",
+    "heidelbeeren",
+    "brombeeren",
+    "johannisbeeren",
+    "beerenmix"
+   ],
+   "suffix": [
+    "beeren"
+   ],
+   "block": [
+    "erdbeermarmelade",
+    "erdbeerjoghurt"
+   ]
+  },
+  "trauben": {
+   "exact": [
+    "trauben",
+    "tafeltrauben",
+    "weintrauben"
+   ],
+   "suffix": [
+    "trauben"
+   ],
+   "block": [
+    "traubensaft",
+    "traubenzucker"
+   ]
+  },
+  "melone": {
+   "exact": [
+    "melone",
+    "wassermelone",
+    "honigmelone",
+    "galiamelone",
+    "cantaloupe"
+   ],
+   "suffix": [
+    "melone"
+   ],
+   "block": []
+  },
+  "pfirsich": {
+   "exact": [
+    "pfirsich",
+    "pfirsiche",
+    "nektarinen",
+    "aprikosen",
+    "flachpfirsiche",
+    "kirschen",
+    "pflaumen",
+    "plattnektarinen"
+   ],
+   "suffix": [
+    "pfirsiche",
+    "aprikosen",
+    "nektarinen",
+    "pflaumen"
+   ],
+   "block": []
+  },
+  "avocado": {
+   "exact": [
+    "avocado",
+    "avocados"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "zucchini": {
+   "exact": [
+    "zucchini"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "aubergine": {
+   "exact": [
+    "aubergine",
+    "auberginen"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "brokkoli": {
+   "exact": [
+    "brokkoli",
+    "broccoli",
+    "blumenkohl",
+    "kohlrabi",
+    "chicorée",
+    "chicoree",
+    "radieschen",
+    "porree",
+    "chinakohl",
+    "pak-choi",
+    "zuckermais",
+    "rote bete",
+    "ingwerstücke"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "pilze": {
+   "exact": [
+    "champignon",
+    "champignons",
+    "pilze",
+    "pfifferlinge"
+   ],
+   "suffix": [
+    "pilze",
+    "champignons"
+   ],
+   "block": [
+    "pilzpfanne",
+    "pilzsauce"
+   ]
+  },
+  "hackfleisch": {
+   "exact": [
+    "hackfleisch",
+    "hack",
+    "gehacktes",
+    "rinderhack",
+    "gemischtes hack"
+   ],
+   "suffix": [
+    "hackfleisch",
+    "hack"
+   ],
+   "block": [
+    "hacksteaks"
+   ]
+  },
+  "hähnchen": {
+   "exact": [
+    "hähnchen",
+    "haehnchen",
+    "hähnchenbrust",
+    "hähnchenbrustfilet",
+    "hähnchenschenkel",
+    "hähnchenflügel",
+    "poulet",
+    "chicken",
+    "wings"
+   ],
+   "suffix": [
+    "hähnchen",
+    "medaillons"
+   ],
+   "block": []
+  },
+  "pute": {
+   "exact": [
+    "pute",
+    "putenbrust",
+    "putenschnitzel",
+    "putensteaks"
+   ],
+   "suffix": [
+    "pute"
+   ],
+   "block": [
+    "putenwurst"
+   ]
+  },
+  "schwein": {
+   "exact": [
+    "schweinefilet",
+    "schweineschnitzel",
+    "schweinebraten",
+    "schweinesteaks",
+    "nackensteaks",
+    "schweinelachs",
+    "kotelett",
+    "krustenbauch",
+    "spare ribs",
+    "schälrippchen",
+    "jägerschnitzel",
+    "cordon"
+   ],
+   "suffix": [
+    "kotelett",
+    "nuggets",
+    "rücken",
+    "rippchen"
+   ],
+   "block": []
+  },
+  "rind": {
+   "exact": [
+    "rindersteak",
+    "rinderfilet",
+    "rinderbraten",
+    "rumpsteak",
+    "entrecote",
+    "rinderrouladen",
+    "rinder",
+    "beinscheiben",
+    "roastbeef",
+    "gulasch",
+    "corned beef",
+    "hüftsteaks",
+    "patties"
+   ],
+   "suffix": [
+    "steak",
+    "steaks"
+   ],
+   "block": []
+  },
+  "bratwurst": {
+   "exact": [
+    "bratwurst",
+    "rostbratwurst",
+    "grillwurst",
+    "bratwürste"
+   ],
+   "suffix": [
+    "bratwurst",
+    "bratwürste"
+   ],
+   "block": []
+  },
+  "wurst": {
+   "exact": [
+    "wurst",
+    "salami",
+    "schinken",
+    "mortadella",
+    "lyoner",
+    "leberwurst",
+    "mettwurst",
+    "wiener",
+    "würstchen",
+    "aufschnitt",
+    "mett",
+    "edelsalami",
+    "cabanossi",
+    "chipolata",
+    "sülze",
+    "serrano",
+    "schinkenwürfel",
+    "currywurst",
+    "currykrakauer"
+   ],
+   "suffix": [
+    "wurst",
+    "würstchen",
+    "schinken",
+    "salami",
+    "aufschnitt"
+   ],
+   "block": []
+  },
+  "fisch": {
+   "exact": [
+    "lachs",
+    "lachsfilet",
+    "forelle",
+    "kabeljau",
+    "seelachs",
+    "garnelen",
+    "shrimps",
+    "fischstäbchen",
+    "matjes",
+    "hering",
+    "thunfisch",
+    "surimi",
+    "calamares",
+    "heringsspezialitäten"
+   ],
+   "suffix": [
+    "fisch",
+    "filet",
+    "garnelen"
+   ],
+   "block": [
+    "fischsauce"
+   ]
+  },
+  "nudeln": {
+   "exact": [
+    "nudeln",
+    "spaghetti",
+    "penne",
+    "fusilli",
+    "tagliatelle",
+    "tortellini",
+    "cappelletti",
+    "gnocchi",
+    "pasta",
+    "lasagne",
+    "ramen",
+    "ramyun"
+   ],
+   "suffix": [
+    "nudeln"
+   ],
+   "block": [
+    "nudelsalat",
+    "nudelsuppe"
+   ]
+  },
+  "reis": {
+   "exact": [
+    "reis",
+    "basmati",
+    "basmatireis",
+    "langkornreis",
+    "jasminreis",
+    "risottoreis"
+   ],
+   "suffix": [
+    "reis"
+   ],
+   "block": [
+    "milchreis",
+    "reiswaffeln",
+    "reisdrink"
+   ]
+  },
+  "mehl": {
+   "exact": [
+    "mehl",
+    "weizenmehl",
+    "dinkelmehl",
+    "panko",
+    "tempura",
+    "paniermehl"
+   ],
+   "suffix": [
+    "mehl"
+   ],
+   "block": []
+  },
+  "zucker": {
+   "exact": [
+    "zucker",
+    "rohrzucker",
+    "puderzucker"
+   ],
+   "suffix": [
+    "zucker"
+   ],
+   "block": [
+    "traubenzucker",
+    "vanillezucker",
+    "zuckerrübensirup"
+   ]
+  },
+  "salz": {
+   "exact": [
+    "salz",
+    "meersalz",
+    "speisesalz"
+   ],
+   "suffix": [],
+   "block": [
+    "salzstangen",
+    "salzbrezeln"
+   ]
+  },
+  "öl": {
+   "exact": [
+    "öl",
+    "olivenöl",
+    "rapsöl",
+    "sonnenblumenöl",
+    "speiseöl",
+    "erdnussöl",
+    "sesamöl",
+    "kokosöl"
+   ],
+   "suffix": [
+    "öl",
+    "oel"
+   ],
+   "block": []
+  },
+  "essig": {
+   "exact": [
+    "essig",
+    "balsamico"
+   ],
+   "suffix": [
+    "essig"
+   ],
+   "block": [
+    "essiggurken"
+   ]
+  },
+  "müsli": {
+   "exact": [
+    "müsli",
+    "muesli",
+    "haferflocken",
+    "granola",
+    "cornflakes",
+    "cerealien",
+    "haferpops",
+    "cerealienmix"
+   ],
+   "suffix": [
+    "müsli",
+    "flocken"
+   ],
+   "block": [
+    "müsliriegel"
+   ]
+  },
+  "marmelade": {
+   "exact": [
+    "marmelade",
+    "konfitüre",
+    "fruchtaufstrich",
+    "brotaufstrich",
+    "honig",
+    "nutella",
+    "nussnougatcreme"
+   ],
+   "suffix": [
+    "marmelade",
+    "konfitüre"
+   ],
+   "block": []
+  },
+  "kaffee": {
+   "exact": [
+    "kaffee",
+    "espresso",
+    "coffee",
+    "kaffeebohnen",
+    "filterkaffee",
+    "kaffeepads",
+    "kaffeekapseln",
+    "caffe",
+    "barista",
+    "kaffeegetränk"
+   ],
+   "suffix": [
+    "kaffee"
+   ],
+   "block": [
+    "kaffeesahne",
+    "eiskaffee",
+    "kaffeeweißer"
+   ]
+  },
+  "tee": {
+   "exact": [
+    "tee",
+    "kräutertee",
+    "früchtetee",
+    "grüner tee",
+    "schwarztee",
+    "matcha",
+    "ländertee"
+   ],
+   "suffix": [
+    "tee"
+   ],
+   "block": [
+    "eistee"
+   ]
+  },
+  "wasser": {
+   "exact": [
+    "wasser",
+    "mineralwasser",
+    "sprudel"
+   ],
+   "suffix": [
+    "wasser"
+   ],
+   "block": []
+  },
+  "saft": {
+   "exact": [
+    "saft",
+    "orangensaft",
+    "apfelsaft",
+    "multivitaminsaft",
+    "nektar",
+    "schorle"
+   ],
+   "suffix": [
+    "saft",
+    "schorle"
+   ],
+   "block": []
+  },
+  "limonade": {
+   "exact": [
+    "limonade",
+    "cola",
+    "coca-cola",
+    "fanta",
+    "sprite",
+    "mezzo mix",
+    "limo",
+    "eistee",
+    "energy drink",
+    "energydrink",
+    "kombucha",
+    "malztrunk",
+    "erfrischungsgetränk"
+   ],
+   "suffix": [
+    "limonade"
+   ],
+   "block": []
+  },
+  "bier": {
+   "exact": [
+    "bier",
+    "pils",
+    "pilsener",
+    "radler",
+    "weißbier",
+    "weizen",
+    "helles",
+    "dunkel",
+    "schwarzbier",
+    "biermischgetränk",
+    "klostergold",
+    "lager"
+   ],
+   "suffix": [
+    "bier"
+   ],
+   "block": [
+    "bierschinken"
+   ]
+  },
+  "wein": {
+   "exact": [
+    "wein",
+    "rotwein",
+    "weißwein",
+    "rosé",
+    "sekt",
+    "prosecco",
+    "secco",
+    "fruchtsecco",
+    "chardonnay",
+    "merlot",
+    "riesling",
+    "grauburgunder",
+    "sauvignon",
+    "blanc",
+    "bordeaux",
+    "chianti",
+    "primitivo",
+    "zweigelt",
+    "cremant",
+    "imiglykos",
+    "rosato",
+    "weinhaltiges"
+   ],
+   "suffix": [
+    "wein"
+   ],
+   "block": [
+    "weinsauerkraut",
+    "weintrauben",
+    "weinessig"
+   ]
+  },
+  "schokolade": {
+   "exact": [
+    "schokolade",
+    "tafelschokolade",
+    "pralinen",
+    "schokoriegel",
+    "hanuta",
+    "amicelli",
+    "lakritz",
+    "kaubonbons",
+    "lollipops",
+    "konfekties",
+    "tiramisu"
+   ],
+   "suffix": [
+    "schokolade"
+   ],
+   "block": [
+    "schokoladenpudding",
+    "trinkschokolade"
+   ]
+  },
+  "kekse": {
+   "exact": [
+    "kekse",
+    "butterkeks",
+    "cookies",
+    "gebäck",
+    "waffeln"
+   ],
+   "suffix": [
+    "kekse",
+    "keks"
+   ],
+   "block": []
+  },
+  "chips": {
+   "exact": [
+    "chips",
+    "tortilla",
+    "nachos",
+    "erdnussflips",
+    "flips",
+    "cracker",
+    "salzstangen",
+    "kartoffelringe",
+    "krupuk",
+    "cheese balls"
+   ],
+   "suffix": [
+    "chips"
+   ],
+   "block": [
+    "kartoffelchips fällt unter chips"
+   ]
+  },
+  "eis": {
+   "exact": [
+    "eis",
+    "eiscreme",
+    "speiseeis",
+    "eistafel",
+    "eiskonfekt",
+    "waffelhörnchen",
+    "eisbecher",
+    "mochi",
+    "icesticks",
+    "raketeneis",
+    "stracciatella",
+    "eisfrüchte"
+   ],
+   "suffix": [
+    "eis"
+   ],
+   "block": [
+    "eistee",
+    "eiswürfel",
+    "eiskaffee"
+   ]
+  },
+  "pizza": {
+   "exact": [
+    "pizza",
+    "steinofenpizza"
+   ],
+   "suffix": [
+    "pizza"
+   ],
+   "block": [
+    "pizzabrötchen",
+    "pizzakäse"
+   ]
+  },
+  "tiefkühlgemüse": {
+   "exact": [
+    "tiefkühlgemüse",
+    "rahmspinat",
+    "spinat",
+    "erbsen",
+    "gemüsemix",
+    "kaidergemüse"
+   ],
+   "suffix": [
+    "gemüse"
+   ],
+   "block": [
+    "buttergemüse zulässig"
+   ]
+  },
+  "pommes": {
+   "exact": [
+    "pommes",
+    "pommes frites",
+    "wedges",
+    "kroketten",
+    "rösti"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "tofu": {
+   "exact": [
+    "tofu",
+    "vegane",
+    "vegan",
+    "veggie",
+    "fleischersatz",
+    "falafel",
+    "gemüsebällchen"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "eintopf": {
+   "exact": [
+    "eintopf",
+    "suppe",
+    "brühe",
+    "bouillon"
+   ],
+   "suffix": [
+    "eintopf",
+    "suppe"
+   ],
+   "block": []
+  },
+  "konserven": {
+   "exact": [
+    "mais",
+    "kidneybohnen",
+    "kichererbsen",
+    "linsen",
+    "bohnen",
+    "tomatenmark",
+    "passierte tomaten",
+    "gehackte tomaten",
+    "sauerkraut",
+    "rotkohl",
+    "oliven",
+    "pfefferoni",
+    "brechbohnen",
+    "datteln"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "soßen": {
+   "exact": [
+    "ketchup",
+    "mayonnaise",
+    "mayo",
+    "senf",
+    "grillsauce",
+    "bbq sauce",
+    "sriracha",
+    "sojasauce",
+    "dressing",
+    "pesto",
+    "ajvar",
+    "zaziki",
+    "tsatsiki",
+    "dip",
+    "dips"
+   ],
+   "suffix": [
+    "sauce",
+    "soße",
+    "sosse"
+   ],
+   "block": []
+  },
+  "gewürze": {
+   "exact": [
+    "pfeffer",
+    "paprikapulver",
+    "curry",
+    "gewürz",
+    "gewürze",
+    "gewürzmischung",
+    "kräuter",
+    "koriander",
+    "ingwer"
+   ],
+   "suffix": [
+    "gewürz"
+   ],
+   "block": [
+    "gewürzgurken"
+   ]
+  },
+  "backwaren": {
+   "exact": [
+    "croissant",
+    "kuchen",
+    "torte",
+    "berliner",
+    "muffins",
+    "brezel",
+    "laugengebäck",
+    "hefezopf",
+    "stollen",
+    "backmischung",
+    "weckli",
+    "flammkuchenböden",
+    "törtchen",
+    "laugenbrezel",
+    "kirschtasche",
+    "spritzring",
+    "donut",
+    "madeleines",
+    "blätterteig",
+    "quarkbällchen",
+    "börekstick",
+    "eisgebäck"
+   ],
+   "suffix": [
+    "kuchen",
+    "backmischung",
+    "törtchen",
+    "croissant",
+    "brezel",
+    "ciabatta"
+   ],
+   "block": []
+  },
+  "windeln/hygiene": {
+   "exact": [
+    "windeln",
+    "toilettenpapier",
+    "küchenrolle",
+    "taschentücher",
+    "zahnpasta",
+    "duschgel",
+    "shampoo",
+    "deo",
+    "deodorant",
+    "waschmittel",
+    "spülmittel",
+    "vanish",
+    "lenor",
+    "zewa"
+   ],
+   "suffix": [
+    "papier",
+    "waschmittel"
+   ],
+   "block": [
+    "stofftaschentücher"
+   ]
+  },
+  "spirituosen": {
+   "exact": [
+    "vodka",
+    "wodka",
+    "whisky",
+    "whiskey",
+    "gin",
+    "rum",
+    "likör",
+    "likoer",
+    "korn",
+    "tequila",
+    "aperol",
+    "batida",
+    "asti",
+    "spirituose",
+    "jack daniels",
+    "jim beam",
+    "bittergetränke",
+    "doppelkorn",
+    "edelbrand",
+    "wermut",
+    "ouzo",
+    "metaxa",
+    "campari",
+    "sherry",
+    "veterano",
+    "cocktails",
+    "bittergetränk"
+   ],
+   "suffix": [
+    "likör",
+    "limes"
+   ],
+   "block": []
+  },
+  "pudding": {
+   "exact": [
+    "pudding",
+    "dessert",
+    "götterspeise",
+    "grießpudding",
+    "mousse",
+    "milchreis",
+    "puddingpulver"
+   ],
+   "suffix": [
+    "pudding"
+   ],
+   "block": []
+  },
+  "nüsse": {
+   "exact": [
+    "nüsse",
+    "erdnüsse",
+    "cashewkerne",
+    "cashew",
+    "erdnuss",
+    "mandeln",
+    "pistazien",
+    "pistazienkerne",
+    "walnüsse",
+    "studentenfutter",
+    "trockenfrüchte"
+   ],
+   "suffix": [
+    "kerne",
+    "nüsse"
+   ],
+   "block": []
+  },
+  "margarine": {
+   "exact": [
+    "margarine",
+    "rama",
+    "cremefine",
+    "pflanzencreme"
+   ],
+   "suffix": [
+    "margarine"
+   ],
+   "block": []
+  },
+  "fertiggericht": {
+   "exact": [
+    "fertiggericht",
+    "fertiggerichte",
+    "tortelloni",
+    "maultaschen",
+    "bowl",
+    "ravioli",
+    "mikrowellengericht",
+    "instant",
+    "gyoza",
+    "onigiri",
+    "wrap",
+    "wraps",
+    "frühlingsrollen",
+    "frühlingsrolle",
+    "gua bao",
+    "jjigae",
+    "antipasti"
+   ],
+   "suffix": [
+    "gericht",
+    "teigtaschen"
+   ],
+   "block": []
+  },
+  "knäckebrot": {
+   "exact": [
+    "knäckebrot",
+    "knusperbrot",
+    "zwieback",
+    "wasa",
+    "reiswaffeln"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "schoten/hülsen": {
+   "exact": [
+    "kaiserschoten",
+    "zuckerschoten",
+    "edamame",
+    "bohnen grün"
+   ],
+   "suffix": [
+    "schoten"
+   ],
+   "block": []
+  },
+  "protein/fitness": {
+   "exact": [
+    "proteinriegel",
+    "high protein",
+    "proteindrink",
+    "proteinpulver",
+    "whey",
+    "trinkmahlzeiten",
+    "trinkmahlzeit"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "fleisch": {
+   "exact": [],
+   "suffix": [
+    "frikadellen"
+   ],
+   "block": []
+  },
+  "obst": {
+   "exact": [
+    "fruchtmix",
+    "sommerfrucht",
+    "obst",
+    "pak choi",
+    "kiwi",
+    "ananas",
+    "mango",
+    "sungold"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "kakao": {
+   "exact": [
+    "kakao",
+    "kakaohaltiges",
+    "trinkschokolade"
+   ],
+   "suffix": [
+    "kakao"
+   ],
+   "block": []
+  },
+  "ente": {
+   "exact": [
+    "ente",
+    "knusperente",
+    "entenbrust"
+   ],
+   "suffix": [],
+   "block": []
+  }
+ },
+ "marken": {
+  "bitburger": "bier",
+  "beck's": "bier",
+  "becks": "bier",
+  "radeberger": "bier",
+  "corona": "bier",
+  "peroni": "bier",
+  "krombacher": "bier",
+  "sternburg": "bier",
+  "schöfferhofer": "bier",
+  "warsteiner": "bier",
+  "paulaner": "bier",
+  "erdinger": "bier",
+  "franziskaner": "bier",
+  "eibauer": "bier",
+  "ur-krostitzer": "bier",
+  "wernesgrüner": "bier",
+  "freiberger": "bier",
+  "5,0 original": "bier",
+  "heineken": "bier",
+  "desperados": "bier",
+  "astra": "bier",
+  "lausitzer": "bier",
+  "red bull": "limonade",
+  "monster": "limonade",
+  "capri-sun": "limonade",
+  "adelholzener": "wasser",
+  "volvic": "wasser",
+  "gerolsteiner": "wasser",
+  "vio ": "wasser",
+  "fritz-kola": "limonade",
+  "valensina": "saft",
+  "pfanner": "saft",
+  "granini": "saft",
+  "hohes c": "saft",
+  "marathon": "limonade",
+  "yfood": "limonade",
+  "nescafé": "kaffee",
+  "nescaf": "kaffee",
+  "jacobs": "kaffee",
+  "dallmayr": "kaffee",
+  "melitta": "kaffee",
+  "l'or": "kaffee",
+  "lavazza": "kaffee",
+  "tchibo": "kaffee",
+  "magico": "kaffee",
+  "milka": "schokolade",
+  "ferrero": "schokolade",
+  "katjes": "schokolade",
+  "haribo": "schokolade",
+  "lindt": "schokolade",
+  "ritter sport": "schokolade",
+  "kitkat": "schokolade",
+  "nesquik": "schokolade",
+  "smarties": "schokolade",
+  "lion": "schokolade",
+  "merci": "schokolade",
+  "toffifee": "schokolade",
+  "wrigley": "schokolade",
+  "bahlsen": "kekse",
+  "leibniz": "kekse",
+  "brandt": "knäckebrot",
+  "coppenrath": "kekse",
+  "lambertz": "kekse",
+  "oreo": "kekse",
+  "lorenz": "chips",
+  "funny-frisch": "chips",
+  "pringles": "chips",
+  "chio": "chips",
+  "pombär": "chips",
+  "ehrmann": "joghurt",
+  "müller": "joghurt",
+  "danone": "joghurt",
+  "fruchtzwerge": "joghurt",
+  "landliebe": "joghurt",
+  "weihenstephan": "milch",
+  "bauer": "joghurt",
+  "meggle": "butter",
+  "hochland": "käse",
+  "st. mang": "käse",
+  "patros": "käse",
+  "grünländer": "käse",
+  "loose": "käse",
+  "cheestrings": "käse",
+  "lindenhof": "käse",
+  "adler": "käse",
+  "ergüllü": "frischkäse",
+  "miree": "frischkäse",
+  "kærgården": "butter",
+  "kaergarden": "butter",
+  "kerrygold": "butter",
+  "milprima": "joghurt",
+  "kids world": "joghurt",
+  "fruchtigurt": "joghurt",
+  "kuchenmeister": "kekse",
+  "borggreve": "kekse",
+  "oma hartmanns": "kekse",
+  "st. michel": "kekse",
+  "dickmann": "schokolade",
+  "storck": "schokolade",
+  "mentos": "schokolade",
+  "chupa chups": "schokolade",
+  "nimm2": "schokolade",
+  "halloren": "schokolade",
+  "milchmäuse": "schokolade",
+  "suchard": "kakao",
+  "fuze tea": "limonade",
+  "active o2": "limonade",
+  "orangina": "limonade",
+  "vitamalz": "limonade",
+  "capri sun": "limonade",
+  "voelkel": "saft",
+  "lübzer": "bier",
+  "spaten": "bier",
+  "benediktiner": "bier",
+  "carlsberg": "bier",
+  "anheuser": "bier",
+  "bud ": "bier",
+  "kloster scheyern": "bier",
+  "gerstacker": "wein",
+  "frizzade": "wein",
+  "secconade": "wein",
+  "cavino": "wein",
+  "cecchi": "wein",
+  "lenz moser": "wein",
+  "doppio passo": "wein",
+  "calvet": "wein",
+  "rothschild": "wein",
+  "grand sud": "wein",
+  "vin de france": "wein",
+  "sandeman": "spirituosen",
+  "osborne": "spirituosen",
+  "nordbrand": "spirituosen",
+  "teekanne": "tee",
+  "oryza": "reis",
+  "leimer": "brot",
+  "miracel whip": "soßen",
+  "apostels": "soßen",
+  "mc cain": "pommes",
+  "namdong": "fertiggericht",
+  "dovgan": "fertiggericht",
+  "satori": "fertiggericht",
+  "tönnies": "schwein",
+  "axel schulz": "schwein",
+  "wilhelm brandenburg": "wurst",
+  "golßener": "soßen",
+  "nordsee": "fisch",
+  "alfrio": "fisch",
+  "wurzener": "chips",
+  "pom-bär": "chips",
+  "bravo": "nüsse",
+  "corny": "müsli",
+  "little moons": "eis",
+  "dr. oetker": "backwaren",
+  "uncle sam": "NONFOOD",
+  "purina": "NONFOOD",
+  "buko": "frischkäse",
+  "kiri": "frischkäse",
+  "magnum": "eis",
+  "ben&jerry": "eis",
+  "ben jerry": "eis",
+  "mikado": "kekse",
+  "prinzenrolle": "kekse",
+  "de beukelaer": "kekse",
+  "raffaello": "schokolade",
+  "maxi king": "schokolade",
+  "goldbären": "schokolade",
+  "pico-balla": "schokolade",
+  "lipton": "limonade",
+  "starbucks": "kaffee",
+  "karlsberg": "bier",
+  "mixery": "bier",
+  "landskron": "bier",
+  "pülleken": "bier",
+  "büble": "bier",
+  "wilthener": "spirituosen",
+  "bacardi": "spirituosen",
+  "nordhäuser": "spirituosen",
+  "pircher": "spirituosen",
+  "martini": "spirituosen",
+  "novantaceppi": "wein",
+  "amédée": "wein",
+  "nudossi": "marmelade",
+  "gutfried": "wurst",
+  "dreistern": "wurst",
+  "steinhaus": "fleisch",
+  "tante fanny": "backwaren",
+  "chovi": "soßen",
+  "delphi": "konserven",
+  "nong shim": "fertiggericht",
+  "garden gourmet": "tofu",
+  "popp": "soßen",
+  "schlichting": "soßen",
+  "hipp": "obst",
+  "gillette": "NONFOOD",
+  "bevola": "NONFOOD",
+  "biff": "NONFOOD",
+  "finish": "NONFOOD",
+  "kitekat": "NONFOOD",
+  "medion": "NONFOOD",
+  "tefal": "NONFOOD",
+  "philips": "NONFOOD",
+  "berndes": "NONFOOD",
+  "newcential": "NONFOOD",
+  "countryside": "NONFOOD",
+  "collectino": "NONFOOD",
+  "dick & durstig": "NONFOOD",
+  "miraball": "NONFOOD",
+  "rauch": "saft",
+  "happy day": "saft",
+  "meica": "bratwurst",
+  "becel": "margarine",
+  "brunch": "margarine",
+  "yogurette": "schokolade",
+  "mars": "schokolade",
+  "berggold": "schokolade",
+  "kathi": "backwaren",
+  "keunecke": "fleisch",
+  "mühlenhof": "fleisch",
+  "windau": "wurst",
+  "züger": "frischkäse",
+  "zespri": "obst",
+  "gösser": "bier",
+  "blanchet": "wein",
+  "grillo": "wein",
+  "tilly": "kekse",
+  "the bitery": "kekse",
+  "milram": "käse",
+  "actimel": "joghurt",
+  "vöslauer": "wasser",
+  "tulip": "fleisch",
+  "zott": "joghurt",
+  "bresso": "frischkäse",
+  "géramont": "käse",
+  "leerdammer": "käse",
+  "milkana": "käse",
+  "arla": "milch",
+  "alpro": "milch",
+  "oatly": "milch",
+  "exquisa": "frischkäse",
+  "almette": "frischkäse",
+  "gazi": "käse",
+  "rama": "margarine",
+  "cremefine": "margarine",
+  "reinert": "wurst",
+  "rügenwalder": "wurst",
+  "herta": "wurst",
+  "wiesenhof": "hähnchen",
+  "bifi": "wurst",
+  "butcher": "rind",
+  "k-purland": "fleisch",
+  "nadler": "fisch",
+  "iglo": "tiefkühlgemüse",
+  "frosta": "fertiggericht",
+  "mövenpick": "eis",
+  "schöller": "eis",
+  "nuii": "eis",
+  "langnese": "eis",
+  "fruity ice": "eis",
+  "knorr": "soßen",
+  "kühne": "soßen",
+  "hellmann": "soßen",
+  "homann": "soßen",
+  "maggi": "soßen",
+  "develey": "soßen",
+  "orto mio": "soßen",
+  "penny ready": "fertiggericht",
+  "bürger": "fertiggericht",
+  "san fabio": "pizza",
+  "greenland": "tiefkühlgemüse",
+  "vitalis": "müsli",
+  "kellogg": "müsli",
+  "ben's original": "fertiggericht",
+  "gorbatschow": "spirituosen",
+  "cinzano": "spirituosen",
+  "baileys": "spirituosen",
+  "jägermeister": "spirituosen",
+  "mangaroca": "spirituosen",
+  "rotkäppchen": "wein",
+  "freixenet": "wein",
+  "nivea": "windeln/hygiene",
+  "l'oréal": "windeln/hygiene",
+  "garnier": "windeln/hygiene",
+  "schwarzkopf": "windeln/hygiene",
+  "palmolive": "windeln/hygiene",
+  "always": "windeln/hygiene",
+  "carefree": "windeln/hygiene",
+  "sagrotan": "windeln/hygiene",
+  "softlan": "windeln/hygiene",
+  "persil": "windeln/hygiene",
+  "ariel": "windeln/hygiene",
+  "pampers": "windeln/hygiene",
+  "crivit": "NONFOOD",
+  "silvercrest": "NONFOOD",
+  "grundig": "NONFOOD",
+  "hammersmith": "NONFOOD",
+  "livington": "NONFOOD",
+  "kingshill": "NONFOOD",
+  "spice&soul": "NONFOOD",
+  "wenger": "NONFOOD",
+  "tronic": "NONFOOD",
+  "brita": "NONFOOD",
+  "sodastream": "NONFOOD",
+  "trendhaus": "NONFOOD",
+  "parkside": "NONFOOD"
+ }
+}
