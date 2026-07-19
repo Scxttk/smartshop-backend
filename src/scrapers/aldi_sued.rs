@@ -161,12 +161,31 @@ pub fn parse_product(item: &serde_json::Value, market_id: &str) -> Option<Offer>
         regular_price,
         category,
         nutri_score: None,
-        valid_from: None,
-        valid_until: None,
+        // Die API liefert keine Gültigkeitsdaten; die Wochenangebote gelten
+        // Mo–Sa der laufenden Woche. Ohne valid_from würde der Push die
+        // Angebote verwerfen (Upsert-Schlüssel ist nicht NULL-sicher).
+        valid_from: Some(current_week_monday()),
+        valid_until: Some(current_week_saturday()),
         images,
         biozid: false,
         flyer_page: None,
     })
+}
+
+/// Montag der laufenden Woche als "YYYY-MM-DD" (wie rewe.rs).
+fn current_week_monday() -> String {
+    use chrono::Datelike;
+    let today = chrono::Local::now().date_naive();
+    let monday = today - chrono::Days::new(u64::from(today.weekday().num_days_from_monday()));
+    monday.format("%Y-%m-%d").to_string()
+}
+
+/// Samstag der laufenden Woche als "YYYY-MM-DD".
+fn current_week_saturday() -> String {
+    use chrono::Datelike;
+    let today = chrono::Local::now().date_naive();
+    let monday = today - chrono::Days::new(u64::from(today.weekday().num_days_from_monday()));
+    (monday + chrono::Days::new(5)).format("%Y-%m-%d").to_string()
 }
 
 // "3,49 €" -> 3.49
