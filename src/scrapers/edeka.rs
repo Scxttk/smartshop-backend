@@ -58,6 +58,12 @@ pub fn find_market(zip: &str) -> Result<Market> {
         .and_then(|v| v.as_str())
         .context("Markt-URL fehlt in der Marktsuche-Antwort")?;
 
+    // Neue URLs (https://www.edeka.de/maerkte/<id>/) tragen die ID schon —
+    // dort gibt es keinen Redirect mehr, den man auflösen könnte
+    if let Some(id) = market_id_from_url(legacy_url) {
+        return Ok(Market::new(id, name));
+    }
+
     // Alte URL -> 308-Redirect -> https://www.edeka.de/maerkte/<id>/
     let target = curl_redirect_url(
         legacy_url,
@@ -71,14 +77,18 @@ pub fn find_market(zip: &str) -> Result<Market> {
         ],
     )
     .with_context(|| util::ctx("EDEKA", "Markt-Redirect auflösen", legacy_url))?;
-    let id = target
-        .split("/maerkte/")
-        .nth(1)
-        .map(|rest| rest.trim_matches('/'))
-        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+    let id = market_id_from_url(&target)
         .with_context(|| format!("Unerwartetes Redirect-Ziel für EDEKA-Markt: {target}"))?;
 
     Ok(Market::new(id, name))
+}
+
+/// Numerische Markt-ID aus einer https://www.edeka.de/maerkte/<id>/-URL.
+fn market_id_from_url(url: &str) -> Option<&str> {
+    url.split("/maerkte/")
+        .nth(1)
+        .map(|rest| rest.trim_matches('/'))
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
 }
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {
