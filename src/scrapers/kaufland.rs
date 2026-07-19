@@ -27,10 +27,13 @@ pub fn find_market(zip: &str) -> Result<Market> {
         .json()
         .with_context(|| util::ctx("Kaufland", "Markt-Lookup JSON parsen", STORE_FINDER_URL))?;
 
-    let store = stores
-        .iter()
-        .find(|s| s.get("pc").and_then(|v| v.as_str()) == Some(zip))
-        .with_context(|| format!("Keine Kaufland-Filiale für PLZ {zip} gefunden"))?;
+    // Exakter PLZ-Treffer, sonst nächste Filiale im Umkreis (Großstadt-PLZs
+    // wie 80331 haben selten eine Filiale mit genau dieser PLZ)
+    let store = match stores.iter().find(|s| s.get("pc").and_then(|v| v.as_str()) == Some(zip)) {
+        Some(s) => s,
+        None => nearest_store(&stores, zip)?
+            .with_context(|| format!("Keine Kaufland-Filiale im Umkreis von PLZ {zip}"))?,
+    };
 
     let id = store
         .get("n")
@@ -44,6 +47,26 @@ pub fn find_market(zip: &str) -> Result<Market> {
     // Koordinaten kommen als Strings ("52.066…"); fehlend/kaputt -> None.
     let coord = |k: &str| store.get(k).and_then(|v| v.as_str()).and_then(|s| s.parse().ok());
     Ok(Market::new(id, name).with_geo(coord("lat"), coord("lng")))
+}
+
+/// Nächste Filiale zur geocodierten PLZ innerhalb von CUTOFF_KM; None, wenn
+/// keine im Umkreis liegt.
+fn nearest_store<'a>(
+    stores: &'a [serde_json::Value],
+    zip: &str,
+) -> Result<Option<&'a serde_json::Value>> {
+    use crate::scrapers::store_finder::{CUTOFF_KM, distance_km, geocode_plz};
+    let center = geocode_plz(zip)?;
+    let coords = |s: &serde_json::Value| -> Option<(f64, f64)> {
+        let get = |k: &str| s.get(k)?.as_str()?.parse::<f64>().ok();
+        Some((get("lat")?, get("lng")?))
+    };
+    Ok(stores
+        .iter()
+        .filter_map(|s| coords(s).map(|c| (s, distance_km(center, c))))
+        .filter(|(_, d)| *d <= CUTOFF_KM)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(s, _)| s))
 }
 
 pub fn fetch_offers(market: &Market) -> Result<Vec<Offer>> {

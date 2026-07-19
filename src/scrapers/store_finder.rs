@@ -188,6 +188,15 @@ pub fn parse_uberall(
 /// Finder-Ergebnis auf das Sync-Verhalten abbilden: Treffer -> echte Filiale,
 /// sauberes "keine Filiale" -> None (Kette wird für die Region nicht
 /// registriert), Fehler -> WARN + nationaler Platzhalter.
+/// Großkreis-Distanz zweier Koordinaten in km (Haversine).
+pub fn distance_km(a: (f64, f64), b: (f64, f64)) -> f64 {
+    const R: f64 = 6371.0;
+    let (dlat, dlon) = ((b.0 - a.0).to_radians(), (b.1 - a.1).to_radians());
+    let h = (dlat / 2.0).sin().powi(2)
+        + a.0.to_radians().cos() * b.0.to_radians().cos() * (dlon / 2.0).sin().powi(2);
+    2.0 * R * h.sqrt().asin()
+}
+
 pub fn resolve(
     chain: &str,
     found: Result<Option<Market>>,
