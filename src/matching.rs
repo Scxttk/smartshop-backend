@@ -204,6 +204,12 @@ mod tests {
         assert!(keys("Milka Schokolade").contains(&"schokolade".to_string()));
         assert!(keys("Chicorée").contains(&"brokkoli".to_string()));
         assert!(keys("Mini-Pak-Choi").contains(&"obst".to_string()));
+        // Aus der Feedback-Schleife (docs/feedback-auswertung.md): „Käse“ traf
+        // ein Schinken-Käse-Croissant. `croissant` steht seither auf der
+        // Blockliste — echter Käse darf davon nichts merken.
+        let croissant = keys("Schinken-Käse-Croissant");
+        assert!(!croissant.contains(&"käse".to_string()), "{croissant:?}");
+        assert!(keys("Gouda jung 48% Fett i. Tr.").contains(&"käse".to_string()));
     }
 
     #[test]

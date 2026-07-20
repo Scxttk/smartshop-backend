@@ -9,3 +9,4 @@
 *.pfx
 *.apk
 *.xapk
+__pycache__/

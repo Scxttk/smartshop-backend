@@ -13,7 +13,7 @@ V = {
  "brot":(["brot","broetchen","brötchen","toast","baguette","ciabatta"],["brot","broetchen","brötchen","toast"],["brotaufstrich","aufbackbrötchen?"]),
  "milch":(["milch","frischmilch","vollmilch","buttermilch","mandeldrink","haferdrink","sojadrink"],["milch"],["milchreis","milchschnitte","milchbrötchen","kokosmilch","milcheis","milchschokolade"]),
  "butter":(["butter","markenbutter"],[],["butterkäse","buttergemüse","erdnussbutter","buttermilch","butterkeks"]),
- "käse":(["käse","kaese","käsescheiben","käsesnack","cottage","gouda","emmentaler","edamer","maasdamer","bergkäse","butterkäse","cheddar","parmesan","grana","halloumi"],["käse","kaese"],["käsekuchen","frischkäse"]),
+ "käse":(["käse","kaese","käsescheiben","käsesnack","cottage","gouda","emmentaler","edamer","maasdamer","bergkäse","butterkäse","cheddar","parmesan","grana","halloumi"],["käse","kaese"],["käsekuchen","frischkäse","croissant"]),
  "frischkäse":(["frischkäse","frischkaese"],[],[]),
  "mozzarella":(["mozzarella"],["mozzarella"],[]),
  "feta":(["feta","hirtenkäse","schafskäse"],[],[]),
@@ -189,18 +189,17 @@ def tokens(s):
     extra = [t[:-1] for t in base if len(t) > 4 and t[-1] in "sne"]
     return base + extra
 
-con = sqlite3.connect(DB)
-rows = con.execute("""select o.title, coalesce(o.subtitle,''), coalesce(o.category,''), m.name
-                      from offers o join markets m on m.id=o.market_id
-                      where o.valid_until >= date('now')""").fetchall()
 
-stats = Counter(); tagged = defaultdict(list); untagged = []
-for title, sub, cat, market in rows:
-    text = f"{title} {sub}"
+def term_hits(text):
+    """Begriffe des Wörterbuchs, die auf einen Angebotstext passen.
+
+    Eigene Funktion, weil docs/feedback-auswertung.py dieselbe Regel braucht,
+    um zu bestimmen, welcher Eintrag einen gemeldeten Fehltreffer verursacht
+    hat. Zwei Kopien dieser Regel wären genau die Sorte Abweichung, die man
+    erst merkt, wenn ein Vorschlag am falschen Eintrag ansetzt.
+    """
     toks = tokens(text)
     ntext = norm(text)
-    if NONFOOD_CAT.search(cat or "") or NONFOOD_TERMS.search(text):
-        stats["nonfood"] += 1; continue
     hits = []
     for term,(exact,suffixes,block) in V.items():
         if any(norm(b) in ntext for b in block if " " in b) or any(norm(b) in toks or any(t == norm(b) for t in toks) for b in block):
@@ -210,37 +209,62 @@ for title, sub, cat, market in rows:
                       and not any(t == norm(b) for b in block) for t in toks)
                   for sfx in suffixes if len(norm(sfx)) >= 4)
         if hit: hits.append(term)
-    if not hits:  # Marken-Fallback
-        for marke, term in MARKEN.items():
-            if norm(marke) and norm(marke) in ntext:
-                if term == "NONFOOD":
-                    hits = ["NONFOOD"]
-                else:
-                    hits = [term]; stats["via_marke"] += 1
-                break
-    if hits == ["NONFOOD"]:
-        stats["nonfood"] += 1; continue
-    if hits:
-        stats["tagged"] += 1
-        for h in hits: tagged[h].append((market, title))
-    else:
-        stats["untagged"] += 1
-        untagged.append((market, title, sub, cat))
+    return hits
 
-total = len(rows)
-print(f"Angebote gültig heute: {total}")
-print(f"Non-Food (per Kategorie erkannt): {stats['nonfood']} ({stats['nonfood']/total:.0%})")
-food = total - stats["nonfood"]
-print(f"Food-Angebote: {food}")
-print(f"  regelbasiert getaggt: {stats['tagged']} ({stats['tagged']/food:.0%})")
-print(f"  ungetaggt:            {stats['untagged']} ({stats['untagged']/food:.0%})")
-print("\n== Treffer pro Begriff (Top 25) ==")
-for term, lst in sorted(tagged.items(), key=lambda x:-len(x[1]))[:25]:
-    print(f"  {term:16s} {len(lst):3d}  z.B. {lst[0][1][:60]}")
-print("\n== Ungetaggte Beispiele (50 zufällig) ==")
-import random; random.seed(1)
-for market, title, sub, cat in random.sample(untagged, min(120, len(untagged))):
-    print(f"  [{market[:12]:12s}] {title[:55]:55s} | {sub[:25]:25s} | {cat[:25]}")
 
-json.dump({"begriffe":{t:{"exact":e,"suffix":s,"block":b} for t,(e,s,b) in V.items()},"marken":MARKEN},
-          open(os.path.join(os.path.dirname(__file__),"matching-woerterbuch.json"),"w"), ensure_ascii=False, indent=1)
+# Ab hier: Messlauf gegen die lokale Nightly-DB. In eine Funktion gefasst,
+# damit `V`, `MARKEN`, `norm` und `tokens` importierbar sind, ohne dass ein
+# Import die Datenbank anfasst — docs/feedback-auswertung.py braucht genau
+# diese Definitionen und darf keine zweite Kopie davon führen.
+def main():
+    con = sqlite3.connect(DB)
+    rows = con.execute("""select o.title, coalesce(o.subtitle,''), coalesce(o.category,''), m.name
+                          from offers o join markets m on m.id=o.market_id
+                          where o.valid_until >= date('now')""").fetchall()
+
+    stats = Counter(); tagged = defaultdict(list); untagged = []
+    for title, sub, cat, market in rows:
+        text = f"{title} {sub}"
+        toks = tokens(text)
+        ntext = norm(text)
+        if NONFOOD_CAT.search(cat or "") or NONFOOD_TERMS.search(text):
+            stats["nonfood"] += 1; continue
+        hits = term_hits(text)
+        if not hits:  # Marken-Fallback
+            for marke, term in MARKEN.items():
+                if norm(marke) and norm(marke) in ntext:
+                    if term == "NONFOOD":
+                        hits = ["NONFOOD"]
+                    else:
+                        hits = [term]; stats["via_marke"] += 1
+                    break
+        if hits == ["NONFOOD"]:
+            stats["nonfood"] += 1; continue
+        if hits:
+            stats["tagged"] += 1
+            for h in hits: tagged[h].append((market, title))
+        else:
+            stats["untagged"] += 1
+            untagged.append((market, title, sub, cat))
+
+    total = len(rows)
+    print(f"Angebote gültig heute: {total}")
+    print(f"Non-Food (per Kategorie erkannt): {stats['nonfood']} ({stats['nonfood']/total:.0%})")
+    food = total - stats["nonfood"]
+    print(f"Food-Angebote: {food}")
+    print(f"  regelbasiert getaggt: {stats['tagged']} ({stats['tagged']/food:.0%})")
+    print(f"  ungetaggt:            {stats['untagged']} ({stats['untagged']/food:.0%})")
+    print("\n== Treffer pro Begriff (Top 25) ==")
+    for term, lst in sorted(tagged.items(), key=lambda x:-len(x[1]))[:25]:
+        print(f"  {term:16s} {len(lst):3d}  z.B. {lst[0][1][:60]}")
+    print("\n== Ungetaggte Beispiele (50 zufällig) ==")
+    import random; random.seed(1)
+    for market, title, sub, cat in random.sample(untagged, min(120, len(untagged))):
+        print(f"  [{market[:12]:12s}] {title[:55]:55s} | {sub[:25]:25s} | {cat[:25]}")
+
+    json.dump({"begriffe":{t:{"exact":e,"suffix":s,"block":b} for t,(e,s,b) in V.items()},"marken":MARKEN},
+              open(os.path.join(os.path.dirname(__file__),"matching-woerterbuch.json"),"w"), ensure_ascii=False, indent=1)
+
+
+if __name__ == "__main__":
+    main()
