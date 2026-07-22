@@ -218,6 +218,22 @@ mod tests {
         let sonnen = keys("Sonnenmilch");
         assert!(!sonnen.contains(&"milch".to_string()), "{sonnen:?}");
         assert!(keys("Haltbare Milch").contains(&"milch".to_string()));
+        // Aus dem proaktiven Angebots-Audit (2026-07-22): Fehl-Tags, die kein
+        // Nutzer mehr melden muss. Jeweils mit Gegenprobe, dass der echte
+        // Treffer den Tag behält.
+        assert!(!keys("Leberkäse").contains(&"käse".to_string()));
+        assert!(keys("Leberkäse").contains(&"wurst".to_string()));
+        assert!(!keys("Schweine-Filet").contains(&"fisch".to_string()));
+        assert!(keys("Schweine-Filet").contains(&"schwein".to_string()));
+        assert!(keys("Doradenfilets").contains(&"fisch".to_string()));
+        assert!(!keys("Kasseler Lachs XXL").contains(&"fisch".to_string()));
+        assert!(keys("Lamm-Lachs mariniert").contains(&"lamm".to_string()));
+        assert!(!keys("Schweinemedaillons").contains(&"hähnchen".to_string()));
+        assert!(keys("Hähnchenmedaillons").contains(&"hähnchen".to_string()));
+        assert!(!keys("Tafeltrauben dunkel").contains(&"bier".to_string()));
+        assert!(keys("Lausitzer Dunkel").contains(&"bier".to_string()));
+        assert!(keys("Kokosnussmilch").contains(&"kokosmilch".to_string()));
+        assert!(!keys("Milch-Schnitte").contains(&"milch".to_string()));
     }
 
     #[test]

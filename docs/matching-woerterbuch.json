@@ -42,7 +42,11 @@
     "milcheis",
     "milchschokolade",
     "kondensmilch",
-    "sonnenmilch"
+    "sonnenmilch",
+    "kokosnussmilch",
+    "milka",
+    "knoppers",
+    "milch schnitte"
    ]
   },
   "butter": {
@@ -89,7 +93,8 @@
    "block": [
     "käsekuchen",
     "frischkäse",
-    "croissant"
+    "croissant",
+    "leberkäse"
    ]
   },
   "frischkäse": {
@@ -520,7 +525,9 @@
     "hähnchen",
     "medaillons"
    ],
-   "block": []
+   "block": [
+    "schweinemedaillons"
+   ]
   },
   "pute": {
    "exact": [
@@ -536,8 +543,30 @@
     "putenwurst"
    ]
   },
+  "kokosmilch": {
+   "exact": [
+    "kokosmilch",
+    "kokosnussmilch"
+   ],
+   "suffix": [],
+   "block": []
+  },
+  "lamm": {
+   "exact": [
+    "lamm",
+    "lammfilets",
+    "lammlachs",
+    "lammkeule"
+   ],
+   "suffix": [],
+   "block": []
+  },
   "schwein": {
    "exact": [
+    "schwein",
+    "schweine",
+    "schweinemedaillons",
+    "kasseler",
     "schweinefilet",
     "schweineschnitzel",
     "schweinebraten",
@@ -614,7 +643,8 @@
     "serrano",
     "schinkenwürfel",
     "currywurst",
-    "currykrakauer"
+    "currykrakauer",
+    "leberkäse"
    ],
    "suffix": [
     "wurst",
@@ -648,7 +678,12 @@
     "garnelen"
    ],
    "block": [
-    "fischsauce"
+    "fischsauce",
+    "schwein",
+    "schweine",
+    "lamm",
+    "lammfilets",
+    "kasseler"
    ]
   },
   "nudeln": {
@@ -902,7 +937,9 @@
     "bier"
    ],
    "block": [
-    "bierschinken"
+    "bierschinken",
+    "trauben",
+    "tafeltrauben"
    ]
   },
   "wein": {
@@ -1501,6 +1538,8 @@
   "nimm2": "schokolade",
   "halloren": "schokolade",
   "milchmäuse": "schokolade",
+  "knoppers": "schokolade",
+  "milch schnitte": "schokolade",
   "suchard": "kakao",
   "fuze tea": "limonade",
   "active o2": "limonade",
