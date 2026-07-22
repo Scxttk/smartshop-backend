@@ -7,6 +7,7 @@ DB = os.path.expanduser("~/.local/share/smartshop/smartshop.db")
 
 # Kategorien, die klar Non-Food sind (Ketten-Marketing-Kategorien)
 NONFOOD_CAT = re.compile(r"mode|style|heim|haus|garten|haustier|tierbedarf|tiernahrung|pflanzen|angeln|elektro|medien|kinderzimmer|wäschepflege|schulstart|kochen-und-grillen|drogerie|spielzeug|alltagshelfer|technik|spielwaren|baumarkt|multimedia|bekleidung|schuhe|camping|auto|buero|non.?food", re.I)
+FOOD_CAT = re.compile(r"obst|gemüse|fleisch|geflügel|wurst|molkerei|fette|getränke|feinkost|konserven|kaffee|tee|süßwaren|knabber|grundnahrung|fisch|bäckerei|backwaren|tiefkühl", re.I)
 
 # Wörterbuch: begriff -> (exakte tokens, komposita-suffixe, blockliste)
 V = {
@@ -230,7 +231,7 @@ def main():
         text = f"{title} {sub}"
         toks = tokens(text)
         ntext = norm(text)
-        if NONFOOD_CAT.search(cat or "") or NONFOOD_TERMS.search(text):
+        if (NONFOOD_CAT.search(cat or "") and not FOOD_CAT.search(cat or "")) or NONFOOD_TERMS.search(text):
             stats["nonfood"] += 1; continue
         hits = term_hits(text)
         if not hits:  # Marken-Fallback
@@ -265,7 +266,7 @@ def main():
     for market, title, sub, cat in random.sample(untagged, min(120, len(untagged))):
         print(f"  [{market[:12]:12s}] {title[:55]:55s} | {sub[:25]:25s} | {cat[:25]}")
 
-    json.dump({"begriffe":{t:{"exact":e,"suffix":s,"block":b} for t,(e,s,b) in V.items()},"marken":MARKEN},
+    json.dump({"begriffe":{t:{"exact":e,"suffix":s,"block":b} for t,(e,s,b) in V.items()},"marken":MARKEN,"nonfood_cat":NONFOOD_CAT.pattern,"nonfood_terms":NONFOOD_TERMS.pattern,"food_cat":FOOD_CAT.pattern},
               open(os.path.join(os.path.dirname(__file__),"matching-woerterbuch.json"),"w"), ensure_ascii=False, indent=1)
 
 

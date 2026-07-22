@@ -22,6 +22,8 @@ const DICT_JSON: &str = include_str!("../docs/matching-woerterbuch.json");
 const NONFOOD_CAT: &str = r"(?i)mode|style|heim|haus|garten|haustier|tierbedarf|tiernahrung|pflanzen|angeln|elektro|medien|kinderzimmer|wäschepflege|schulstart|kochen-und-grillen|drogerie|spielzeug|alltagshelfer|technik|spielwaren|baumarkt|multimedia|bekleidung|schuhe|camping|auto|buero|non.?food";
 
 // Non-Food-Begriffe im Titel (fängt Non-Food in Food-Kategorien wie „Wochenangebote").
+const FOOD_CAT: &str = r"(?i)obst|gemüse|fleisch|geflügel|wurst|molkerei|fette|getränke|feinkost|konserven|kaffee|tee|süßwaren|knabber|grundnahrung|fisch|bäckerei|backwaren|tiefkühl";
+
 const NONFOOD_TERMS: &str = r"(?i)lichterkette|lampion|wäschest|wäscheklammer|wäschekorb|kettensäge|akku|werkzeug|kinderbuch|spielzeug|rosen\b|blumen|pflanze|socken|shorts|shirt|cap\b|hose|schuhe|handtuch|bettwäsche|pfannen?\b|topf\b|löffel|messer|grill\b|kohle|batterie|lampe|leuchte|katzen|hunde|tiernahrung|nassfutter|trockenfutter|snack für|rasenkanten|solar|deko|kissen|matratze|drucker|kopfhörer|wc-|reiniger|megaperls|oxi action|schreibwaren|mikrofon|duschregal|sonnensegel|wäscheparf|karaoke|trinkzubehör|wäschetrockner|weißer riese|sonnenspray|duftspüler|sonnencreme|feuchttücher|servietten|haushaltstücher|klumpstreu|geschirrtücher|platzset|schlafsack|fusselrolle|bügeleisen|glasschüssel|lautsprecher|geräusche-box|fliegengitter|kajak|husarenknöpfchen|lavendel|bilderbuch|wecker|hairstyler|bastelkoffer|kochgeschirr|grillplatte|boombox|fliegenfalle|mottenabwehr|badvorleger|schrubber|kosmetikspiegel|shorty|plaid|fototafel|komfort-bh|pantoletten|spannbetttuch|küchentücher|sneaker|hoodie|bodyspray|deospray|sonnenschutz|dutch oven|gläsersortiment|sonnenschirm|tischdecke|fleece|wellnessbürste|maniküre|pediküre|teppich|taillenslip|haftcreme|wasserballon|corega|axe ";
 
 // Tokens, bei denen Suffix-Matching generell verboten ist (falsche Komposita).
@@ -46,6 +48,7 @@ struct Dict {
     brands: Vec<(String, String)>,
     nonfood_cat: Regex,
     nonfood_terms: Regex,
+    food_cat: Regex,
 }
 
 fn dict() -> &'static Dict {
@@ -91,11 +94,21 @@ fn dict() -> &'static Dict {
                 Some((b, key))
             })
             .collect();
+        // Regexe kommen aus der JSON (eine Quelle mit der Python-Referenz);
+        // die Konstanten sind nur Fallback für alte JSON-Stände. Python-
+        // Patterns tragen kein eingebettetes (?i), daher hier ergänzen.
+        let rx = |field: &str, fallback: &str| -> Regex {
+            match v[field].as_str() {
+                Some(p) => Regex::new(&format!("(?i){p}")).unwrap(),
+                None => Regex::new(fallback).unwrap(),
+            }
+        };
         Dict {
             terms,
             brands,
-            nonfood_cat: Regex::new(NONFOOD_CAT).unwrap(),
-            nonfood_terms: Regex::new(NONFOOD_TERMS).unwrap(),
+            nonfood_cat: rx("nonfood_cat", NONFOOD_CAT),
+            nonfood_terms: rx("nonfood_terms", NONFOOD_TERMS),
+            food_cat: rx("food_cat", FOOD_CAT),
         }
     })
 }
@@ -145,7 +158,12 @@ pub fn match_keys(title: &str, subtitle: Option<&str>, category: Option<&str>) -
         Some(sub) if !sub.is_empty() => format!("{title} {sub}"),
         _ => title.to_string(),
     };
-    if d.nonfood_cat.is_match(category.unwrap_or("")) || d.nonfood_terms.is_match(&text) {
+    // Kategorie-Nonfood nur, wenn die Kategorie keinen Food-Marker trägt —
+    // Kauflands Obsttheke heißt „Obst, Gemüse, Pflanzen" und flog sonst
+    // komplett über das Wort „Pflanzen" raus (Fund 2026-07-22).
+    let cat = category.unwrap_or("");
+    if (d.nonfood_cat.is_match(cat) && !d.food_cat.is_match(cat)) || d.nonfood_terms.is_match(&text)
+    {
         return vec![NONFOOD_KEY.to_string()];
     }
     let ntext = norm(&text);
@@ -255,6 +273,16 @@ mod tests {
     #[test]
     fn nonfood_und_ungetaggt() {
         assert_eq!(match_keys("Duschbad", None, Some("drogerie")), vec![NONFOOD_KEY]);
+        // Kauflands Obsttheke heißt „Obst, Gemüse, Pflanzen" — der Food-Marker
+        // in der Kategorie schlägt das „Pflanzen" (Fund 2026-07-22).
+        assert_eq!(
+            match_keys("Dtsch. Zwetschgen, lose", None, Some("Obst, Gemüse, Pflanzen")),
+            vec!["pfirsich"]
+        );
+        assert_eq!(
+            match_keys("Duschbad", None, Some("Drogerie, Tiernahrung")),
+            vec![NONFOOD_KEY]
+        );
         assert_eq!(keys("Sagrotan Hygiene-Spray 2in1"), vec!["windeln/hygiene"]);
         assert_eq!(keys("Crivit Trekkingstöcke"), vec![NONFOOD_KEY]);
         assert!(keys("Ciolino").is_empty()); // kontextloser Flyer-Titel → Review-Liste
