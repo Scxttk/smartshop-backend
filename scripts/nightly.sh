@@ -148,7 +148,11 @@ run_step() {
 
 log "Start Nightly-Lauf (Fallback-PLZ $ZIP, DB $DB, dry-run=$DRY_RUN)"
 
-SYNC_ARGS=(sync-regions --db "$DB" ${CERT_ARGS[@]+"${CERT_ARGS[@]}"})
+# Die Nightly soll ALLE aktiven Regionen schaffen — der CLI-Default (10)
+# ist ein Schutz für manuelle Läufe, würde hier aber Regionen auf die
+# nächste Nacht verschieben (Fund 2026-07-22: 15 aktive Regionen, 5 blieben
+# pro Lauf liegen). MAX_REGIONS in der env übersteuert bei Bedarf.
+SYNC_ARGS=(sync-regions --db "$DB" --max-regions "${MAX_REGIONS:-50}" ${CERT_ARGS[@]+"${CERT_ARGS[@]}"})
 [ "$DRY_RUN" -eq 1 ] && SYNC_ARGS+=(--dry-run)
 
 log "Schritt 'sync-regions': ${SYNC_ARGS[*]}"
