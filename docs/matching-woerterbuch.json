@@ -52,6 +52,9 @@
   "butter": {
    "exact": [
     "butter",
+    "süßrahmbutter",
+    "weidebutter",
+    "markenbutter",
     "markenbutter",
     "kräuterbutter"
    ],
@@ -126,7 +129,8 @@
   "quark": {
    "exact": [
     "quark",
-    "speisequark"
+    "speisequark",
+    "skyr"
    ],
    "suffix": [
     "quark"
@@ -425,7 +429,10 @@
     "flachpfirsiche",
     "kirschen",
     "pflaumen",
-    "plattnektarinen"
+    "plattnektarinen",
+    "zwetschgen",
+    "mirabellen",
+    "sauerkirschen"
    ],
    "suffix": [
     "pfirsiche",
@@ -543,6 +550,13 @@
     "putenwurst"
    ]
   },
+  "kondensmilch": {
+   "exact": [
+    "kondensmilch"
+   ],
+   "suffix": [],
+   "block": []
+  },
   "kokosmilch": {
    "exact": [
     "kokosmilch",
@@ -644,7 +658,12 @@
     "schinkenwürfel",
     "currywurst",
     "currykrakauer",
-    "leberkäse"
+    "leberkäse",
+    "hackepeter",
+    "knacker",
+    "räucherlendchen",
+    "schinkenspeck",
+    "schinkenkrakauer"
    ],
    "suffix": [
     "wurst",
@@ -668,6 +687,12 @@
     "matjes",
     "hering",
     "thunfisch",
+    "räucherlachs",
+    "lachsseite",
+    "dorade",
+    "doraden",
+    "kabeljauloin",
+    "wildlachs",
     "surimi",
     "calamares",
     "heringsspezialitäten"
@@ -699,7 +724,10 @@
     "pasta",
     "lasagne",
     "ramen",
-    "ramyun"
+    "ramyun",
+    "teigwaren",
+    "eierspätzle",
+    "kritharaki"
    ],
    "suffix": [
     "nudeln"
@@ -958,6 +986,8 @@
     "grauburgunder",
     "sauvignon",
     "blanc",
+    "champagner",
+    "jahrgangssekt",
     "bordeaux",
     "chianti",
     "primitivo",
@@ -1154,6 +1184,9 @@
     "sojasauce",
     "dressing",
     "pesto",
+    "tomatenketchup",
+    "tzatziki",
+    "zaziki",
     "ajvar",
     "zaziki",
     "tsatsiki",
@@ -1163,7 +1196,8 @@
    "suffix": [
     "sauce",
     "soße",
-    "sosse"
+    "sosse",
+    "ketchup"
    ],
    "block": []
   },
@@ -1268,6 +1302,7 @@
     "doppelkorn",
     "edelbrand",
     "wermut",
+    "grappa",
     "ouzo",
     "metaxa",
     "campari",
@@ -1615,12 +1650,25 @@
   "nordhäuser": "spirituosen",
   "pircher": "spirituosen",
   "martini": "spirituosen",
+  "fernet": "spirituosen",
+  "captain morgan": "spirituosen",
+  "lillet": "spirituosen",
+  "kinder bueno": "schokolade",
+  "kinder riegel": "schokolade",
+  "kinder schoko": "schokolade",
+  "kinder cards": "schokolade",
+  "kinder delice": "schokolade",
+  "kinder milchschnitte": "schokolade",
+  "mr. tom": "nüsse",
   "novantaceppi": "wein",
   "amédée": "wein",
   "nudossi": "marmelade",
   "gutfried": "wurst",
   "dreistern": "wurst",
   "steinhaus": "fleisch",
+  "cevapcici": "fleisch",
+  "bifteki": "fleisch",
+  "souvlaki": "fleisch",
   "tante fanny": "backwaren",
   "chovi": "soßen",
   "delphi": "konserven",

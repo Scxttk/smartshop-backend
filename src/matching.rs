@@ -234,6 +234,16 @@ mod tests {
         assert!(keys("Lausitzer Dunkel").contains(&"bier".to_string()));
         assert!(keys("Kokosnussmilch").contains(&"kokosmilch".to_string()));
         assert!(!keys("Milch-Schnitte").contains(&"milch".to_string()));
+        // Aus dem Alle-Regionen-Audit (2026-07-22, frische KW nach Neu-Scrape):
+        // echte Food-Lücken geschlossen.
+        assert!(keys("Zwetschgen, lose").contains(&"pfirsich".to_string()));
+        assert!(keys("De Cecco italienische Teigwaren").contains(&"nudeln".to_string()));
+        assert!(keys("Monopole Blue Top Champagner Brut").contains(&"wein".to_string()));
+        assert!(keys("Norwegischer Räucherlachs XXL").contains(&"fisch".to_string()));
+        assert!(keys("Tomatenketchup").contains(&"soßen".to_string()));
+        assert!(keys("Skyr Natur").contains(&"quark".to_string()));
+        assert!(keys("Süßrahmbutter").contains(&"butter".to_string()));
+        assert!(keys("Gezuckerte Kondensmilch").contains(&"kondensmilch".to_string()));
     }
 
     #[test]
