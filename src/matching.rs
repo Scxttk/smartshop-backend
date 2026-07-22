@@ -210,6 +210,14 @@ mod tests {
         let croissant = keys("Schinken-Käse-Croissant");
         assert!(!croissant.contains(&"käse".to_string()), "{croissant:?}");
         assert!(keys("Gouda jung 48% Fett i. Tr.").contains(&"käse".to_string()));
+        // Aus der Feedback-Schleife (Pflegerunde 2026-07-22): „Milch" traf
+        // Gezuckerte Kondensmilch (Netto) und Sonnenmilch (Netto). Beide
+        // stehen seither auf der Blockliste — echte Milch bleibt unberührt.
+        let kondens = keys("Gezuckerte Kondensmilch");
+        assert!(!kondens.contains(&"milch".to_string()), "{kondens:?}");
+        let sonnen = keys("Sonnenmilch");
+        assert!(!sonnen.contains(&"milch".to_string()), "{sonnen:?}");
+        assert!(keys("Haltbare Milch").contains(&"milch".to_string()));
     }
 
     #[test]

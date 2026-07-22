@@ -11,7 +11,7 @@ NONFOOD_CAT = re.compile(r"mode|style|heim|haus|garten|haustier|tierbedarf|tiern
 # Wörterbuch: begriff -> (exakte tokens, komposita-suffixe, blockliste)
 V = {
  "brot":(["brot","broetchen","brötchen","toast","baguette","ciabatta"],["brot","broetchen","brötchen","toast"],["brotaufstrich","aufbackbrötchen?"]),
- "milch":(["milch","frischmilch","vollmilch","buttermilch","mandeldrink","haferdrink","sojadrink"],["milch"],["milchreis","milchschnitte","milchbrötchen","kokosmilch","milcheis","milchschokolade"]),
+ "milch":(["milch","frischmilch","vollmilch","buttermilch","mandeldrink","haferdrink","sojadrink"],["milch"],["milchreis","milchschnitte","milchbrötchen","kokosmilch","milcheis","milchschokolade","kondensmilch","sonnenmilch"]),
  "butter":(["butter","markenbutter"],[],["butterkäse","buttergemüse","erdnussbutter","buttermilch","butterkeks"]),
  "käse":(["käse","kaese","käsescheiben","käsesnack","cottage","gouda","emmentaler","edamer","maasdamer","bergkäse","butterkäse","cheddar","parmesan","grana","halloumi"],["käse","kaese"],["käsekuchen","frischkäse","croissant"]),
  "frischkäse":(["frischkäse","frischkaese"],[],[]),
