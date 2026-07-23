@@ -1,29 +1,30 @@
 # smartshop
 
-Ein CLI-Werkzeug, das Angebote deutscher Supermärkte scrapt, in einer
-SQLite-Datenbank speichert und durchsuch-, vergleich- und beobachtbar macht.
-Acht Ketten werden unterstützt (Rewe, Penny, Kaufland, Lidl, Netto, ALDI Nord,
-ALDI Süd, EDEKA). Die CLI-Ausgabe ist deutsch.
+A CLI tool that scrapes offers from German supermarkets, stores them in a
+SQLite database, and makes them searchable, comparable, and watchable.
+Eight chains are supported (Rewe, Penny, Kaufland, Lidl, Netto, ALDI Nord,
+ALDI Süd, EDEKA). The CLI output itself is in German.
 
-## Bauen & Installieren
+## Building & installing
 
-Rust (Edition 2024) wird benötigt:
+Rust (edition 2024) is required:
 
 ```sh
 cargo build --release
 # Binary: target/release/smartshop
 ```
 
-Für die Rewe-Scraper zusätzlich das `rewerse`-CLI und ein Client-Zertifikat —
-siehe [docs/rewe-cert.md](docs/rewe-cert.md). Netto, ALDI Süd und EDEKA rufen
-das System-`curl` auf (Akamai blockt reqwest), `curl` muss also im `PATH` sein.
+The Rewe scrapers additionally need the `rewerse` CLI and a client
+certificate — see [docs/rewe-cert.md](docs/rewe-cert.md). Netto, ALDI Süd, and
+EDEKA shell out to the system `curl` (Akamai blocks reqwest), so `curl` must be
+on the `PATH`.
 
-Jeder Befehl nimmt `--db <pfad>` (Standard `smartshop.db` im Arbeitsverzeichnis).
-Die Datenbank wird bei Bedarf angelegt und migriert.
+Every command takes `--db <path>` (default `smartshop.db` in the working
+directory). The database is created and migrated on demand.
 
-## Schnellstart
+## Quick start
 
-Angebote abrufen und speichern:
+Fetch and store offers:
 
 ```sh
 smartshop fetch --store lidl --zip 50667
@@ -34,19 +35,19 @@ smartshop fetch --store lidl --zip 50667
 # 470 Angebote in 'smartshop.db' gespeichert.
 ```
 
-Alle Ketten auf einmal (`--all-stores`, mit Zusammenfassung pro Kette; einzelne
-Fehler brechen den Lauf nicht ab):
+All chains at once (`--all-stores`, with a per-chain summary; individual
+failures don't abort the run):
 
 ```sh
 smartshop fetch --all-stores --zip 50667
 ```
 
-`--dry-run` gibt nur aus, ohne zu speichern; `--notify` prüft nach dem Abruf die
-Watchlist.
+`--dry-run` only prints without storing; `--notify` checks the watchlist after
+the fetch.
 
-## Befehle
+## Commands
 
-### search — Angebote nach Titel durchsuchen
+### search — search offers by title
 
 ```sh
 smartshop search Butter
@@ -54,9 +55,9 @@ smartshop search Butter
 #   ...
 ```
 
-Optional `--max-price <euro>`.
+Optionally `--max-price <euro>`.
 
-### compare — Preis eines Produkts über alle Märkte
+### compare — price of a product across all markets
 
 ```sh
 smartshop compare Milch
@@ -65,10 +66,10 @@ smartshop compare Milch
 #   ...
 ```
 
-Gruppiert nach normalisiertem Produktnamen, günstigster Markt zuerst, mit
-Grundpreis wo ableitbar.
+Grouped by normalized product name, cheapest market first, with unit price
+where derivable.
 
-### stats — Statistik pro Markt + Top-Rabatte
+### stats — per-market statistics + top discounts
 
 ```sh
 smartshop stats
@@ -80,35 +81,35 @@ smartshop stats
 #    1. -80 %  UNCLE SAM Herren-T-Shirt* je Stück — 3.99 € statt 19.99 € (Penny Am Eigelstein)
 ```
 
-### history — Preisverlauf eines Produkts
+### history — price history of a product
 
 ```sh
 smartshop history Butter
 ```
 
-Zeigt je Titel/Markt die über die Zeit gesehenen Preise (aus `price_history`).
+Shows, per title/market, the prices seen over time (from `price_history`).
 
-### deals — Preissenkungen
+### deals — price drops
 
 ```sh
-smartshop deals            # alle erfassten Senkungen
-smartshop deals --since 7  # nur der letzten 7 Tage
+smartshop deals            # all recorded drops
+smartshop deals --since 7  # only the last 7 days
 ```
 
-### watch — Watchlist (cron-tauglich)
+### watch — watchlist (cron-friendly)
 
 ```sh
 smartshop watch add Kaffee --max-price 5
 # Watch #1 angelegt: 'Kaffee' (bis 5.00 €)
 smartshop watch list
-smartshop watch check   # druckt Treffer, Exit-Code 1 wenn es welche gibt
+smartshop watch check   # prints hits, exit code 1 if there are any
 smartshop watch remove 1
 ```
 
-`watch check` endet mit **Exit-Code 1**, sobald mindestens ein Watch anschlägt
-(sonst 0) — siehe [docs/cron.md](docs/cron.md) für Benachrichtigungen.
+`watch check` exits with **exit code 1** as soon as at least one watch matches
+(0 otherwise) — see [docs/cron.md](docs/cron.md) for notifications.
 
-### list — Einkaufsliste
+### list — shopping list
 
 ```sh
 smartshop list add Butter
@@ -119,70 +120,69 @@ smartshop list remove Butter
 smartshop list clear
 ```
 
-`suggest` findet je Artikel das günstigste passende Angebot über alle Märkte.
+`suggest` finds the cheapest matching offer per item across all markets.
 
-### export — JSON oder CSV
+### export — JSON or CSV
 
 ```sh
 smartshop export --format csv --query Butter > butter.csv
 smartshop export --format json --out angebote.json
 ```
 
-Ohne `--out` geht die Ausgabe auf stdout; `--query` filtert nach Titel/Untertitel.
+Without `--out` the output goes to stdout; `--query` filters by title/subtitle.
 
-### serve — Web-Dashboard + lesende JSON-API
+### serve — web dashboard + read-only JSON API
 
 ```sh
 smartshop serve --port 8080
 # Web-UI läuft auf http://0.0.0.0:8080, JSON-API auf http://0.0.0.0:8080/api (DB: smartshop.db)
 ```
 
-Das Web-Dashboard liegt auf `/`, die JSON-Endpoints unter `/api/*`
-(siehe unten und [docs/cron.md](docs/cron.md)).
+The web dashboard lives at `/`, the JSON endpoints under `/api/*`
+(see below and [docs/cron.md](docs/cron.md)).
 
-### push — Supabase-Push
+### push — Supabase push
 
-Lädt die gespeicherten Angebote in die Supabase-Tabelle `public.offers`
-(PostgREST-Upsert auf `market,product,valid_from,region`, Batches à 100) und
-trägt die PLZ in `public.regions` ein. Veraltete Wochen des jeweiligen Markts
-werden vorher gelöscht. Angebote ohne Preis werden übersprungen.
+Uploads the stored offers to the Supabase table `public.offers`
+(PostgREST upsert on `market,product,valid_from,region`, batches of 100) and
+registers the ZIP code in `public.regions`. Outdated weeks for the respective
+market are deleted first. Offers without a price are skipped.
 
 ```sh
 export SUPABASE_URL="https://xyz.supabase.co"
-export SUPABASE_SERVICE_KEY="…"   # Service-Role-Key, nicht der anon key
+export SUPABASE_SERVICE_KEY="…"   # service role key, not the anon key
 
-smartshop push --region 01219                  # alle Märkte
-smartshop push --store lidl --region 01219     # nur eine Kette
-smartshop push --dry-run                       # nur zeigen, kein Netzwerk
+smartshop push --region 01219                  # all markets
+smartshop push --store lidl --region 01219     # a single chain
+smartshop push --dry-run                       # print only, no network
 ```
 
-`--region <PLZ>` ist Pflicht (außer bei `--dry-run`). Für den wöchentlichen
-Sync per Cron einfach nach dem Abruf pushen:
+`--region <ZIP>` is required (except with `--dry-run`). For the weekly sync
+via cron, simply push after the fetch:
 
-Für den regelmäßigen Sync übernimmt `scripts/nightly.sh` sync-regions +
-Watchlist-Check in einem Rutsch; auf macOS installiert
-`scripts/install-launchd.sh` den fertigen Nacht-Agent — siehe
-[docs/automation.md](docs/automation.md).
+For the regular sync, `scripts/nightly.sh` handles sync-regions plus the
+watchlist check in one go; on macOS, `scripts/install-launchd.sh` installs the
+ready-made nightly agent — see [docs/automation.md](docs/automation.md).
 
-Beim Push wird jedes Angebot deterministisch angereichert (`src/enrich.rs`):
-`category` enthält eine von 15 festen Kategorien (statt der rohen
-Scraper-Kategorie), `emoji` ein passendes Emoji aus einer kuratierten
-Keyword-Tabelle — ohne Treffer das Standard-Emoji der Kategorie, nie null.
-Die App hardcodet diese Liste; Änderungen nur zusammen mit einem App-Update
-(Regressionstest in `tests/enrich.rs`).
+During the push, every offer is deterministically enriched (`src/enrich.rs`):
+`category` holds one of 15 fixed categories (instead of the raw scraper
+category), `emoji` a matching emoji from a curated keyword table — with no
+match, the category's default emoji, never null. The app hardcodes this list;
+changes only go out together with an app update (regression test in
+`tests/enrich.rs`).
 
-Zusätzlich trägt jede Zeile in `image_url` ein Produktbild: Die Scraper liefern
-die Händler-Bild-URLs mit, der Push spiegelt sie in den öffentlichen
-Supabase-Storage-Bucket `offer-images` (`src/storage.rs`) und schreibt die
-stabile Bucket-URL in die Zeile — Händler-CDNs rotieren ihre Pfade wöchentlich
-und blocken teils Hotlinks. Die Spiegelung ist idempotent (Objektpfad =
-sha256 der Quell-URL, Upload mit `x-upsert`); bereits hochgeladene Bilder merkt
-sich die lokale Tabelle `uploaded_images`, sodass Nachtläufe nur neue Bilder
-anfassen. Fehler einzelner Bilder brechen den Push nicht ab — dann bleibt die
-Händler-URL stehen, das Emoji ist der letzte Fallback in der App.
-`--no-mirror-images` schaltet die Spiegelung ab.
+In addition, every row carries a product image in `image_url`: the scrapers
+deliver the retailer image URLs, the push mirrors them into the public
+Supabase storage bucket `offer-images` (`src/storage.rs`) and writes the
+stable bucket URL into the row — retailer CDNs rotate their paths weekly and
+some block hotlinking. The mirroring is idempotent (object path = sha256 of
+the source URL, upload with `x-upsert`); already-uploaded images are tracked
+in the local table `uploaded_images`, so nightly runs only touch new images.
+Failures of individual images don't abort the push — the retailer URL stays in
+place, and the emoji is the last fallback in the app. `--no-mirror-images`
+disables the mirroring.
 
-| Kategorie | Default-Emoji | | Kategorie | Default-Emoji |
+| Category | Default emoji | | Category | Default emoji |
 |---|---|---|---|---|
 | Obst & Gemüse | 🥬 | | Alkohol | 🍺 |
 | Molkerei & Eier | 🥛 | | Vorräte & Kochen | 🥫 |
@@ -193,133 +193,130 @@ Händler-URL stehen, das Emoji ist der letzte Fallback in der App.
 | Süßes & Snacks | 🍬 | | Sonstiges | 🛒 |
 | Getränke | 🥤 | | | |
 
-### sync-regions — Multi-Region-Sync
+### sync-regions — multi-region sync
 
-Liest alle aktiven Regionen aus der Supabase-Tabelle `public.regions`
-(sortiert nach `requested_at`, älteste Anfrage zuerst) und macht pro PLZ den
-kompletten Durchlauf: alle Ketten fetchen, gefundene Filialen nach
-`public.markets` melden, Angebote mit `--region <PLZ>` pushen. Die lokale
-`offers`-Tabelle wird pro Region geleert, damit keine Angebote fremder
-Regionen mitgepusht werden.
+Reads all active regions from the Supabase table `public.regions`
+(sorted by `requested_at`, oldest request first) and runs the full pipeline
+per ZIP code: fetch all chains, report found stores to `public.markets`, push
+offers with `--region <ZIP>`. The local `offers` table is cleared per region
+so that no offers from other regions get pushed along.
 
 ```sh
 export SUPABASE_URL="https://xyz.supabase.co"
 export SUPABASE_SERVICE_KEY="…"
 
-smartshop sync-regions                          # bis zu 10 Regionen
-smartshop sync-regions --max-regions 3          # Limit ändern
-smartshop sync-regions --dry-run                # keine Supabase-Writes
+smartshop sync-regions                          # up to 10 regions
+smartshop sync-regions --max-regions 3          # change the limit
+smartshop sync-regions --dry-run                # no Supabase writes
 ```
 
-Fehler einzelner Regionen brechen den Lauf nicht ab; Exit-Code ≠ 0 nur,
-wenn alle Regionen scheitern oder die Tabelle leer/unerreichbar ist.
-Voraussetzung: die Migration `supabase/migration_v3_multi_region.sql`
-wurde einmalig im Supabase SQL-Editor ausgeführt (siehe
-[docs/ci.md](docs/ci.md)).
+Failures of individual regions don't abort the run; exit code ≠ 0 only if all
+regions fail or the table is empty/unreachable. Prerequisite: the migration
+`supabase/migration_v3_multi_region.sql` has been run once in the Supabase SQL
+editor (see [docs/ci.md](docs/ci.md)).
 
-## Scraper-Unterstützung
+## Scraper support
 
-| Kette | Auth nötig | Markt | Angebote (ballpark) |
+| Chain | Auth required | Market | Offers (ballpark) |
 |---|---|---|---|
-| Rewe | ja — TLS-Cert + `rewerse` | filialspezifisch (PLZ) | ~323 |
-| Penny | nein | filialspezifisch (PLZ) | ~540 |
-| Kaufland | nein | filialspezifisch (PLZ) | variiert (nicht jede PLZ) |
-| Lidl | nein | national¹ | ~470 |
-| Netto | nein (curl) | filialspezifisch (PLZ) | ~190 |
-| ALDI Nord | nein | national¹ | ~240 |
-| ALDI Süd | nein (curl) | national¹ | ~75 |
-| EDEKA | nein (curl) | filialspezifisch (PLZ) | variiert (nicht jede Region) |
+| Rewe | yes — TLS cert + `rewerse` | store-specific (ZIP) | ~323 |
+| Penny | no | store-specific (ZIP) | ~540 |
+| Kaufland | no | store-specific (ZIP) | varies (not every ZIP) |
+| Lidl | no | national¹ | ~470 |
+| Netto | no (curl) | store-specific (ZIP) | ~190 |
+| ALDI Nord | no | national¹ | ~240 |
+| ALDI Süd | no (curl) | national¹ | ~75 |
+| EDEKA | no (curl) | store-specific (ZIP) | varies (not every region) |
 
-Ballpark-Zahlen aus einem Live-Abruf für PLZ 50667 (Köln) am 2026-07-17;
-tatsächliche Zahlen schwanken pro Woche und Filiale. Kaufland und EDEKA lieferten
-für diese PLZ keinen Treffer — beide sind regionsabhängig. Der Rewe-Wert (~323)
-stammt aus einem Live-Abruf für PLZ 01219 (Dresden, Markt „REWE Supermarkt",
-ID 565005) am 2026-07-18.
+Ballpark numbers from a live fetch for ZIP 50667 (Cologne) on 2026-07-17;
+actual numbers vary per week and store. Kaufland and EDEKA returned no hits
+for this ZIP — both are region-dependent. The Rewe number (~323) comes from a
+live fetch for ZIP 01219 (Dresden, store "REWE Supermarkt", ID 565005) on
+2026-07-18.
 
-¹ Die *Angebote* sind national, die *Präsenz* nicht mehr: `find_market` fragt
-den offiziellen Filialfinder der Kette (Lidl: Bing Spatial Data Service hinter
-lidl.de, ALDI Nord/SÜD: Uberall-Locator; PLZ-Geocoding via Nominatim,
-`src/scrapers/store_finder.rs`). Gibt es im Umkreis von 15 km eine Filiale,
-wird sie mit Name, ID und Koordinaten registriert; sonst wird die Kette für
-die Region gar nicht registriert. Scheitert der Finder selbst (Netz,
-Formatänderung), fällt der Sync mit WARN auf den nationalen Platzhalter
-zurück. Penny und Kaufland liefern ihre Filial-Koordinaten ohnehin mit —
-`markets.lat/lon` (migration_v8) trägt sie, NULL wo unbekannt.
+¹ The *offers* are national, the *presence* no longer is: `find_market`
+queries the chain's official store finder (Lidl: Bing Spatial Data Service
+behind lidl.de, ALDI Nord/Süd: Uberall locator; ZIP geocoding via Nominatim,
+`src/scrapers/store_finder.rs`). If there is a store within 15 km, it is
+registered with name, ID, and coordinates; otherwise the chain is not
+registered for the region at all. If the finder itself fails (network, format
+change), the sync falls back to the national placeholder with a WARN. Penny
+and Kaufland deliver their store coordinates anyway — `markets.lat/lon`
+(migration_v8) carries them, NULL where unknown.
 
-## HTTP-API-Endpoints
+## HTTP API endpoints
 
-Alle Endpoints sind `GET` und liefern JSON; Fehler als `{"error": "..."}` mit
-Status 400 (fehlender/ungültiger Parameter) oder 500. Über `smartshop serve`
-sind sie unter dem Präfix **`/api`** erreichbar (z. B. `/api/offers?q=Butter`);
-die Wurzelpfade gehören dem Web-Dashboard.
+All endpoints are `GET` and return JSON; errors as `{"error": "..."}` with
+status 400 (missing/invalid parameter) or 500. Via `smartshop serve` they are
+reachable under the **`/api`** prefix (e.g. `/api/offers?q=Butter`); the root
+paths belong to the web dashboard.
 
-| Endpoint | Parameter | Liefert |
+| Endpoint | Parameters | Returns |
 |---|---|---|
-| `/markets` | – | Gespeicherte Filialen |
-| `/offers` | `q` (Pflicht), `max_price`, `market` | Angebote zur Suche |
-| `/compare` | `q` (Pflicht) | Preisvergleich, gruppiert pro Produkt |
-| `/stats` | – | Angebote/Filiale + Top-10-Rabatte |
-| `/history` | `q` (Pflicht) | Preisverlauf |
-| `/deals` | `since` (Tage, optional) | Preissenkungen |
+| `/markets` | – | Stored stores |
+| `/offers` | `q` (required), `max_price`, `market` | Offers matching the search |
+| `/compare` | `q` (required) | Price comparison, grouped per product |
+| `/stats` | – | Offers per store + top 10 discounts |
+| `/history` | `q` (required) | Price history |
+| `/deals` | `since` (days, optional) | Price drops |
 | `/watches` | – | Watchlist |
 | `/watches/check` | – | `{"hits": bool, "watches": [...]}` |
-| `/list` | – | Einkaufsliste |
-| `/list/suggest` | – | Günstigster Markt je Listen-Artikel |
+| `/list` | – | Shopping list |
+| `/list/suggest` | – | Cheapest market per list item |
 
-Die API ist rein lesend und **ohne Authentifizierung** — nur im vertrauten Netz
-betreiben.
+The API is read-only and **unauthenticated** — only run it on a trusted
+network.
 
-## Web-Dashboard
+## Web dashboard
 
-`smartshop serve` liefert zusätzlich ein server-gerendertes HTML-Dashboard —
-komplett ohne JavaScript, CSS eingebettet, keine externen Assets.
+`smartshop serve` additionally delivers a server-rendered HTML dashboard —
+entirely without JavaScript, CSS embedded, no external assets.
 
-| Seite | Inhalt |
+| Page | Content |
 |---|---|
-| `/` | Übersicht: Angebote pro Markt, Gültigkeitszeiträume, Top-Rabatte |
-| `/search?q=…` | Angebotssuche mit Markt, Preis und Grundpreis |
-| `/compare?q=…` | Preisvergleich pro Produkt über alle Märkte, günstigster zuerst |
-| `/watchlist` | Beobachtungen anzeigen, anlegen und entfernen (POST-Formulare) |
-| `/history?offer=…` | Preisverlauf als Inline-SVG-Sparkline plus Tabelle |
+| `/` | Overview: offers per market, validity periods, top discounts |
+| `/search?q=…` | Offer search with market, price, and unit price |
+| `/compare?q=…` | Price comparison per product across all markets, cheapest first |
+| `/watchlist` | View, create, and remove watches (POST forms) |
+| `/history?offer=…` | Price history as an inline SVG sparkline plus table |
 
-Wie die JSON-API ist das Dashboard ohne Authentifizierung — nur im vertrauten
-Netz betreiben. Schreibend ist einzig die Watchlist (anlegen/entfernen).
+Like the JSON API, the dashboard is unauthenticated — only run it on a
+trusted network. The watchlist (create/remove) is the only thing that writes.
 
-## Datenbank & Schema
+## Database & schema
 
-SQLite im WAL-Modus. Tabellen: `markets`, `offers`, `price_history`, `watches`,
-`shopping_list`, `uploaded_images`. Die Schema-Version steht in `PRAGMA user_version`; `db::open()`
-migriert beim Öffnen automatisch auf die aktuelle Version. Schema-Änderungen
-erhöhen `SCHEMA_VERSION` und ergänzen einen Migrationsschritt in `migrate()`
-(`src/db.rs`) — bestehende Datenbanken werden dabei in-place aktualisiert.
+SQLite in WAL mode. Tables: `markets`, `offers`, `price_history`, `watches`,
+`shopping_list`, `uploaded_images`. The schema version lives in
+`PRAGMA user_version`; `db::open()` automatically migrates to the current
+version on open. Schema changes bump `SCHEMA_VERSION` and add a migration step
+in `migrate()` (`src/db.rs`) — existing databases are updated in place.
 
-Das Supabase-Schema (Tabellen `offers`, `regions`, `markets` plus
-Storage-Bucket `offer-images`) liegt kanonisch unter
-[`supabase/`](supabase/) — `schema.sql` + Migrationen; neue Projekte:
-`setup_full.sql`, dann `migration_regions.sql`,
-`migration_v3_multi_region.sql`, `migration_v4_region_trigger.sql`,
-`migration_v5_image_url.sql` und `migration_v6_storage_bucket.sql` im
-SQL-Editor ausführen.
+The Supabase schema (tables `offers`, `regions`, `markets` plus the storage
+bucket `offer-images`) lives canonically under [`supabase/`](supabase/) —
+`schema.sql` + migrations; for new projects: run `setup_full.sql`, then
+`migration_regions.sql`, `migration_v3_multi_region.sql`,
+`migration_v4_region_trigger.sql`, `migration_v5_image_url.sql`, and
+`migration_v6_storage_bucket.sql` in the SQL editor.
 
-## Preis-Historie
+## Price history
 
-Zusätzlich zur wochenaktuellen `offers`-Tabelle schreibt jeder Push dieselben
-Zeilen in die Supabase-Tabelle `price_history` (nicht zu verwechseln mit der
-gleichnamigen lokalen SQLite-Tabelle) — als dauerhafter Wochen-Schnappschuss,
-damit die App später Preisverläufe anzeigen kann. Upsert-Schlüssel ist
-`(market, product, region, valid_from)`: Ein erneuter Push derselben Woche
-aktualisiert die Zeilen, statt sie zu duplizieren. Zeilen ohne Preis werden
-übersprungen. Fehler beim Historien-Schreiben (z. B. fehlende Tabelle) geben
-nur eine Warnung aus — der eigentliche Offers-Push schlägt dadurch nie fehl.
+In addition to the weekly `offers` table, every push writes the same rows to
+the Supabase table `price_history` (not to be confused with the local SQLite
+table of the same name) — as a permanent weekly snapshot so the app can later
+show price histories. The upsert key is
+`(market, product, region, valid_from)`: pushing the same week again updates
+the rows instead of duplicating them. Rows without a price are skipped.
+Failures while writing the history (e.g. missing table) only emit a warning —
+the actual offers push never fails because of it.
 
-**Manuelle Migration:** `supabase/migration_v7_price_history.sql` einmalig im
-Supabase-SQL-Editor ausführen. Bis dahin läuft jeder Push zwar erfolgreich
-durch, meldet aber `WARNUNG: Preis-Historie fehlgeschlagen`.
+**Manual migration:** run `supabase/migration_v7_price_history.sql` once in
+the Supabase SQL editor. Until then, every push still succeeds but reports
+`WARNUNG: Preis-Historie fehlgeschlagen`.
 
-## Dokumentation
+## Documentation
 
-- [docs/rewe-cert.md](docs/rewe-cert.md) — Rewe-TLS-Zertifikat einrichten
-- [docs/automation.md](docs/automation.md) — nächtlicher launchd-Agent (macOS)
-- [docs/cron.md](docs/cron.md) — Cron-Automatisierung und JSON-API
-- [docs/ci.md](docs/ci.md) — GitHub-Actions-CI, Nightly-Sync und Migrationen
-- [scripts/nightly.sh](scripts/nightly.sh) — Pipeline-Skript sync-regions + watch check (mit Einzel-PLZ-Fallback)
+- [docs/rewe-cert.md](docs/rewe-cert.md) — setting up the Rewe TLS certificate
+- [docs/automation.md](docs/automation.md) — nightly launchd agent (macOS)
+- [docs/cron.md](docs/cron.md) — cron automation and the JSON API
+- [docs/ci.md](docs/ci.md) — GitHub Actions CI, nightly sync, and migrations
+- [scripts/nightly.sh](scripts/nightly.sh) — pipeline script sync-regions + watch check (with single-ZIP fallback)
