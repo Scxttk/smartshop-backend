@@ -120,11 +120,18 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
-    /// HTTP-API (nur lesend) für die gespeicherten Angebote starten
+    /// Lokales Web-Dashboard und HTTP-API für die gespeicherten Angebote starten
     Serve {
         /// Port für den HTTP-Server
         #[arg(long, default_value_t = 8080)]
         port: u16,
+
+        /// Adresse, an die gebunden wird. Standard: nur lokal (Loopback).
+        /// Für Zugriff aus dem LAN bewusst z. B. `--host 0.0.0.0` setzen —
+        /// dann ist das Dashboard ohne Authentifizierung für alle im Netz
+        /// erreichbar.
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
 
         /// Pfad zur SQLite-Datenbank
         #[arg(long, default_value = "smartshop.db")]
@@ -291,7 +298,7 @@ fn main() -> Result<()> {
         Command::Watch { action } => watch(action),
         Command::List { action } => shopping_list(action),
         Command::Deals { since, db } => deals(since, db),
-        Command::Serve { port, db } => smartshop::api::serve(port, db),
+        Command::Serve { port, host, db } => smartshop::api::serve(&host, port, db),
         Command::Push { store, all_stores: _, region, dry_run, no_mirror_images, db } => {
             let opts = smartshop::push::PushOptions {
                 db_path: db,

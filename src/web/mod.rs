@@ -6,8 +6,10 @@ mod svg;
 
 use std::sync::Arc;
 
-use axum::extract::{Form, Query, State};
-use axum::http::StatusCode;
+use axum::extract::{Form, Query, Request, State};
+use axum::http::header::{HOST, ORIGIN, REFERER};
+use axum::http::{HeaderMap, StatusCode};
+use axum::middleware::{from_fn, Next};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -50,15 +52,80 @@ impl From<anyhow::Error> for WebError {
 }
 
 pub fn router(db_path: String) -> Router {
+    // Zustandsändernde POST-Routen bekommen einen Same-Origin-/CSRF-Schutz
+    // (siehe `same_origin_guard`). Er hängt nur an diesen Routen, damit die
+    // lesenden GET-Seiten und die JSON-API unverändert erreichbar bleiben.
+    let mutating = Router::new()
+        .route("/watchlist/add", post(watchlist_add))
+        .route("/watchlist/remove", post(watchlist_remove))
+        .route_layer(from_fn(same_origin_guard));
+
     Router::new()
         .route("/", get(overview))
         .route("/search", get(search))
         .route("/compare", get(compare))
         .route("/watchlist", get(watchlist))
-        .route("/watchlist/add", post(watchlist_add))
-        .route("/watchlist/remove", post(watchlist_remove))
         .route("/history", get(history))
+        .merge(mutating)
         .with_state(Arc::new(WebState { db_path }))
+}
+
+/// CSRF-/Same-Origin-Schutz für zustandsändernde POST-Routen.
+///
+/// Das Dashboard hat keine Sessions und keine Tokens; stattdessen wird geprüft,
+/// dass ein POST nachweislich vom Dashboard selbst ausgelöst wurde. Ein per CSRF
+/// von einer fremden Seite abgeschickter Formular-POST trägt im Browser immer
+/// verräterische Header, die das Skript der Angreiferseite nicht fälschen kann:
+/// `Sec-Fetch-Site: cross-site`/`same-site` bzw. einen fremden `Origin`. Solche
+/// Requests werden mit 403 abgewiesen. Ein gewöhnlicher, gleich-originiger
+/// Formular-POST aus dem Dashboard (mit `Sec-Fetch-Site: same-origin` und
+/// passendem `Origin`) passiert die Prüfung. Requests ganz ohne diese Header
+/// (z. B. `curl`, das CLI-nahe Nutzung) sind kein Browser-CSRF-Vektor und
+/// werden zugelassen, damit die lokale Bedienung nicht bricht.
+async fn same_origin_guard(request: Request, next: Next) -> Response {
+    if is_same_origin(request.headers()) {
+        next.run(request).await
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            Html(page(
+                "Abgelehnt",
+                "<p>Anfrage abgelehnt: Sie kam nicht vom Dashboard selbst (CSRF-Schutz).</p>",
+            )),
+        )
+            .into_response()
+    }
+}
+
+/// Prüft anhand der Request-Header, ob der POST vom Dashboard selbst stammt.
+fn is_same_origin(headers: &HeaderMap) -> bool {
+    // `Sec-Fetch-Site` ist ein "forbidden header name": Skripte einer fremden
+    // Seite können ihn nicht setzen. Moderne Browser senden ihn bei jedem
+    // Request, deshalb ist er das zuverlässigste Signal.
+    if let Some(site) = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
+        return matches!(site, "same-origin" | "none");
+    }
+    // Fallback für ältere Browser: Origin (bzw. Referer) mit dem Host der
+    // Anfrage vergleichen. Browser senden `Origin` bei cross-origin- (und
+    // modernen gleich-originigen) Formular-POSTs zuverlässig mit.
+    let host = headers.get(HOST).and_then(|v| v.to_str().ok());
+    if let Some(origin) = headers.get(ORIGIN).and_then(|v| v.to_str().ok()) {
+        return host.is_some_and(|h| authority_matches(origin, h));
+    }
+    if let Some(referer) = headers.get(REFERER).and_then(|v| v.to_str().ok()) {
+        return host.is_some_and(|h| authority_matches(referer, h));
+    }
+    // Weder Sec-Fetch-Site noch Origin noch Referer: kein Browser-CSRF möglich.
+    true
+}
+
+/// Vergleicht die Autorität (host:port) einer Origin-/Referer-URL mit dem
+/// `Host`-Header der Anfrage. Schema wird ignoriert (das Dashboard läuft über
+/// plain HTTP); eine opake Origin ("null") oder eine leere Autorität passt nie.
+fn authority_matches(url: &str, host: &str) -> bool {
+    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = after_scheme.split(['/', '?', '#']).next().unwrap_or("");
+    !authority.is_empty() && authority.eq_ignore_ascii_case(host)
 }
 
 // Anzeigename wie im CLI/in der API: Titel plus Untertitel, wenn dieser kein

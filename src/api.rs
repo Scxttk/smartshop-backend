@@ -68,12 +68,18 @@ pub fn router(db_path: String) -> Router {
 }
 
 /// HTTP-Server starten (blockiert bis zum Abbruch).
-pub fn serve(port: u16, db_path: String) -> Result<()> {
+///
+/// `host` ist die Bind-Adresse. Standard (siehe main.rs) ist die Loopback-
+/// Adresse `127.0.0.1`, damit das ungeschützte Dashboard nicht ungewollt im
+/// LAN erreichbar ist; eine LAN-Freigabe (z. B. `0.0.0.0`) ist nur über die
+/// bewusste Angabe von `--host` möglich.
+pub fn serve(host: &str, port: u16, db_path: String) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
+        let listener = tokio::net::TcpListener::bind((host, port)).await?;
+        let addr = listener.local_addr()?;
         println!(
-            "Web-UI läuft auf http://0.0.0.0:{port}, JSON-API auf http://0.0.0.0:{port}/api (DB: {db_path})"
+            "Web-UI läuft auf http://{addr}, JSON-API auf http://{addr}/api (DB: {db_path})"
         );
         let app = crate::web::router(db_path.clone()).nest("/api", router(db_path));
         axum::serve(listener, app).await?;

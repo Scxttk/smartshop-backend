@@ -203,6 +203,52 @@ fn watchlist_add_and_remove_roundtrip() {
 }
 
 #[test]
+fn watchlist_add_rejects_cross_origin_post() {
+    let dbf = fixture_db("csrf");
+    let addr = spawn_server(&dbf);
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+
+    // Cross-origin Formular-POST (fremder Origin) wird abgewiesen.
+    let resp = client
+        .post(format!("http://{addr}/watchlist/add"))
+        .header("Origin", "http://evil.example")
+        .form(&[("query", "CSRF"), ("max_price", "1.00")])
+        .send()
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 403);
+
+    // Auch ein cross-site Sec-Fetch-Site wird abgewiesen.
+    let resp = client
+        .post(format!("http://{addr}/watchlist/add"))
+        .header("Sec-Fetch-Site", "cross-site")
+        .form(&[("query", "CSRF"), ("max_price", "1.00")])
+        .send()
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 403);
+
+    // Nichts davon darf in die DB gelangt sein.
+    let (status, body) = get(addr, "/watchlist");
+    assert_eq!(status, 200);
+    assert!(body.contains("Keine Beobachtungen angelegt."), "body: {body}");
+
+    // Gleich-originiger POST (passender Origin) funktioniert weiterhin.
+    let resp = client
+        .post(format!("http://{addr}/watchlist/add"))
+        .header("Origin", format!("http://{addr}"))
+        .header("Sec-Fetch-Site", "same-origin")
+        .form(&[("query", "Kaffee"), ("max_price", "5.00")])
+        .send()
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 303);
+    let (status, body) = get(addr, "/watchlist");
+    assert_eq!(status, 200);
+    assert!(body.contains("Kaffee"), "body: {body}");
+}
+
+#[test]
 fn history_renders_svg_sparkline() {
     let dbf = fixture_db("history");
     // Synthetischer Verlauf: Butter war vor einer Woche teurer (Muster aus tests/cli.rs)
