@@ -57,8 +57,23 @@ jobs:
         run: |
           set -uo pipefail
           FOUND=false
-          RUN_ID=$(gh run list --workflow ci.yml --branch master --status success \
-            --limit 1 --json databaseId --jq '.[0].databaseId' || true)
+          # SICHERHEIT: Nur Artefakte aus Push-Läufen auf master IN DIESEM Repo
+          # ausführen. `--branch` filtert nur den Head-Branch-*Namen*, den ein
+          # Fork-PR frei wählt (Branch "master" im Fork) — so ein Lauf ist ein
+          # `pull_request`-Event aus einem Fremd-Repo. `--event push` schließt
+          # PR-Läufe aus (Push auf master braucht hier Schreibrechte), und die
+          # head_repository-Prüfung stellt sicher, dass das Binary aus diesem
+          # Repository stammt, bevor es im Secrets-Job ausgeführt wird.
+          RUN_ID=$(gh run list --workflow ci.yml --branch master --event push \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId' || true)
+          if [ -n "$RUN_ID" ]; then
+            HEAD_REPO=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" \
+              --jq '.head_repository.full_name' || true)
+            if [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+              echo "::warning::CI-Lauf $RUN_ID stammt nicht aus $GITHUB_REPOSITORY (head_repository=$HEAD_REPO) — ignoriere Artefakt."
+              RUN_ID=""
+            fi
+          fi
           if [ -n "$RUN_ID" ] \
               && gh run download "$RUN_ID" --name smartshop-linux-x86_64 --dir prebuilt \
               && [ -f prebuilt/smartshop ]; then
