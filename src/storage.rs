@@ -7,12 +7,41 @@
 //! gleicher Pfad -> kein Duplikat. Den teuren Download sparen sich Aufrufer
 //! über den lokalen SQLite-Cache (`db::cached_image_url`).
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
 use crate::push::PushConfig;
 
 pub const BUCKET: &str = "offer-images";
+
+/// Erlaubte Bild-Hosts der Händler-CDNs (SSRF-Schutz). Abgeleitet aus den
+/// Bild-URLs, die die Scraper tatsächlich erzeugen — belegt durch die Fixtures
+/// unter `tests/fixtures/` und die fest kodierten URLs der Scraper, NICHT aus
+/// beliebigem Fremd-Input:
+///   penny.de          — penny.rs      (imageRendition -> `cdn.penny.de`)
+///   netto-online.de   — netto.rs      (img.tc-product-image -> `www.netto-online.de`)
+///   rewe-static.de    — rewe.rs       (images[] -> `img.rewe-static.de`)
+///   media.schwarz     — kaufland.rs   (img.k-product-tile -> `kaufland.media.schwarz`)
+///   aldi.cx           — aldi_sued.rs  (assets[].url -> `dm.emea.cms.aldi.cx`)
+///   s7g10.scene7.com  — aldi_nord.rs  (assets[].url -> Adobe-Scene7-Shard)
+///   mg2de.b-cdn.net   — lidl.rs       (fest kodiert, marktguru-BunnyCDN)
+///   edeka             — edeka.rs      (img src -> `offer-images.api.edeka`; die
+///                                      `.edeka`-gTLD gehört komplett EDEKA)
+/// Ein Host passt bei exakter Gleichheit oder als echte Subdomain eines
+/// Eintrags (host == suffix || host endet auf ".{suffix}"). Neue Händler-CDNs
+/// hier ergänzen.
+const ALLOWED_IMAGE_HOST_SUFFIXES: &[&str] = &[
+    "penny.de",
+    "netto-online.de",
+    "rewe-static.de",
+    "media.schwarz",
+    "aldi.cx",
+    "s7g10.scene7.com",
+    "mg2de.b-cdn.net",
+    "edeka",
+];
 
 /// Deterministischer Objektpfad: sha256(Quell-URL) + Datei-Endung der Quelle.
 pub fn object_path(source_url: &str) -> String {
@@ -42,6 +71,106 @@ pub fn public_url(base_url: &str, path: &str) -> String {
     format!("{base_url}/storage/v1/object/public/{BUCKET}/{path}")
 }
 
+/// SSRF-Schutz für eine Händler-Bild-URL, bevor sie geladen wird: nur https,
+/// Host auf der CDN-Allow-Liste (keine IP-Literale, keine internen Hostnamen),
+/// und keine Auflösung in private/lokale Adressbereiche. Fehler bedeutet
+/// „nicht spiegeln“ — der Aufrufer (`push::mirror_images`) überspringt das
+/// einzelne Bild und bricht den Push nicht ab.
+fn validate_source_url(source_url: &str) -> Result<()> {
+    let url = reqwest::Url::parse(source_url)
+        .with_context(|| format!("Bild-URL nicht parsebar: {source_url}"))?;
+    if url.scheme() != "https" {
+        bail!("Bild-URL abgelehnt (kein https): {source_url}");
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("Bild-URL ohne Host: {source_url}"))?;
+
+    // IP-Literale nie erlauben — echte Händler-CDNs tragen Domainnamen. Das
+    // sperrt u. a. `https://192.168.1.1/…` und `https://169.254.169.254/…`.
+    if host.parse::<IpAddr>().is_ok() {
+        bail!("Bild-URL abgelehnt (IP-Literal als Host): {source_url}");
+    }
+    if !host_is_allowed(host) {
+        bail!("Bild-URL abgelehnt (Host nicht auf CDN-Allow-Liste): {source_url}");
+    }
+
+    // Defense-in-depth: den (allow-gelisteten) Host auflösen und jede Ziel-IP
+    // gegen private/lokale Bereiche prüfen, damit ein CDN-Name, der auf ein
+    // internes Netz zeigt, nicht geladen wird.
+    let port = url.port_or_known_default().unwrap_or(443);
+    let addrs: Vec<_> = (host, port)
+        .to_socket_addrs()
+        .with_context(|| format!("Bild-Host nicht auflösbar: {host}"))?
+        .collect();
+    if addrs.is_empty() {
+        bail!("Bild-Host ohne Adressen: {host}");
+    }
+    if let Some(bad) = addrs.iter().map(|a| a.ip()).find(|ip| is_blocked_ip(*ip)) {
+        bail!("Bild-URL abgelehnt (Host löst in internen Bereich {bad} auf): {source_url}");
+    }
+    Ok(())
+}
+
+/// Host gegen die CDN-Allow-Liste prüfen: exakte Gleichheit oder echte
+/// Subdomain eines Eintrags. Der führende Punkt in ".{suffix}" verhindert
+/// Trick-Hosts wie `penny.de.attacker.tld` oder `evilpenny.de`.
+fn host_is_allowed(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    ALLOWED_IMAGE_HOST_SUFFIXES
+        .iter()
+        .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+}
+
+/// Content-Type gegen eine Bild-Allow-Liste prüfen und den kanonischen Wert
+/// zurückgeben. Alles andere -> None (Antwort wird NICHT hochgeladen, statt den
+/// Remote-Header blind zu übernehmen).
+fn allowed_image_content_type(content_type: &str) -> Option<&'static str> {
+    let main = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    match main.as_str() {
+        "image/jpeg" | "image/jpg" => Some("image/jpeg"),
+        "image/png" => Some("image/png"),
+        "image/webp" => Some("image/webp"),
+        "image/gif" => Some("image/gif"),
+        "image/avif" => Some("image/avif"),
+        _ => None,
+    }
+}
+
+/// True, wenn die IP in einem privaten/lokalen Bereich liegt, der von außen
+/// nicht erreichbar sein darf (Loopback, RFC1918, Link-Local inkl.
+/// Cloud-Metadata 169.254.169.254, Unique-Local, unspecified …).
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_blocked_ipv4(v4),
+        IpAddr::V6(v6) => is_blocked_ipv6(v6),
+    }
+}
+
+fn is_blocked_ipv4(ip: Ipv4Addr) -> bool {
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local() // 169.254/16 (u. a. Cloud-Metadata 169.254.169.254)
+        || ip.is_unspecified() // 0.0.0.0
+        || ip.is_broadcast() // 255.255.255.255
+        || ip.is_documentation()
+        // Carrier-Grade-NAT 100.64.0.0/10
+        || (ip.octets()[0] == 100 && (ip.octets()[1] & 0xc0) == 64)
+}
+
+fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() {
+        return true;
+    }
+    // IPv4-gemappte Adressen (::ffff:a.b.c.d) über die v4-Regeln prüfen.
+    if let Some(v4) = ip.to_ipv4_mapped() {
+        return is_blocked_ipv4(v4);
+    }
+    let seg0 = ip.segments()[0];
+    // Unique-Local fc00::/7 und Link-Local fe80::/10.
+    (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80
+}
+
 /// Bild vom Händler laden und in den Bucket hochladen; liefert die öffentliche
 /// Bucket-URL. Idempotent dank content-adressiertem Pfad + `x-upsert` — ein
 /// erneuter Aufruf für dasselbe Bild überschreibt dasselbe Objekt.
@@ -50,9 +179,14 @@ pub fn mirror(
     cfg: &PushConfig,
     source_url: &str,
 ) -> Result<String> {
+    // SSRF-Schutz: Quelle prüfen, BEVOR irgendein Netzwerkzugriff erfolgt.
+    validate_source_url(source_url)?;
+
     let path = object_path(source_url);
 
-    // Bild vom Händler-CDN laden.
+    // Bild vom Händler-CDN laden. `client` folgt bewusst keinen Redirects
+    // (siehe `push::run`), damit ein 3xx nicht auf ein internes Ziel umgelenkt
+    // werden kann.
     let resp = client
         .get(source_url)
         .send()
@@ -60,12 +194,16 @@ pub fn mirror(
     if !resp.status().is_success() {
         bail!("Bild-Download {source_url}: HTTP {}", resp.status());
     }
-    let content_type = resp
+    // Content-Type gegen die Bild-Allow-Liste prüfen statt den Remote-Header
+    // blind weiterzureichen; Nicht-Bilder werden nicht hochgeladen.
+    let remote_ct = resp
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("image/jpeg")
-        .to_string();
+        .unwrap_or("");
+    let Some(content_type) = allowed_image_content_type(remote_ct) else {
+        bail!("Bild-Download {source_url}: unerlaubter Content-Type '{remote_ct}'");
+    };
     let bytes = resp.bytes().context("Bild-Bytes lesen fehlgeschlagen")?;
 
     // In den Bucket hochladen (idempotent via x-upsert).
@@ -121,5 +259,89 @@ mod tests {
             public_url("https://p.supabase.co", "abc.png"),
             "https://p.supabase.co/storage/v1/object/public/offer-images/abc.png"
         );
+    }
+
+    // ----------------------------------------------------- SSRF-Validierung
+
+    #[test]
+    fn host_allow_list_accepts_real_retailer_hosts() {
+        // Exakt die Hosts, die die Scraper laut Fixtures erzeugen.
+        for host in [
+            "cdn.penny.de",
+            "www.netto-online.de",
+            "img.rewe-static.de",
+            "kaufland.media.schwarz",
+            "dm.emea.cms.aldi.cx",
+            "s7g10.scene7.com",
+            "mg2de.b-cdn.net",
+            "offer-images.api.edeka",
+        ] {
+            assert!(host_is_allowed(host), "sollte erlaubt sein: {host}");
+        }
+    }
+
+    #[test]
+    fn host_allow_list_rejects_lookalikes_and_foreign_hosts() {
+        for host in [
+            "evil.example.com",
+            "penny.de.attacker.tld", // Suffix-Trick
+            "evilpenny.de",          // kein Punkt vor penny.de
+            "notpenny.de",
+            "metadata.google.internal",
+            "localhost",
+        ] {
+            assert!(!host_is_allowed(host), "sollte abgelehnt werden: {host}");
+        }
+    }
+
+    #[test]
+    fn validate_rejects_non_https_and_ip_literals_and_foreign_hosts() {
+        // http statt https.
+        assert!(validate_source_url("http://cdn.penny.de/a.jpg").is_err());
+        // IP-Literale (inkl. Cloud-Metadata) — vor jeder DNS-Auflösung.
+        assert!(validate_source_url("https://192.168.1.1/status").is_err());
+        assert!(validate_source_url("https://127.0.0.1/a.jpg").is_err());
+        assert!(validate_source_url("https://169.254.169.254/latest/meta-data").is_err());
+        // Fremder Host, nicht auf der Allow-Liste.
+        assert!(validate_source_url("https://evil.example.com/a.jpg").is_err());
+        // Kaputte URL.
+        assert!(validate_source_url("not a url").is_err());
+    }
+
+    #[test]
+    fn content_type_allow_list() {
+        assert_eq!(allowed_image_content_type("image/jpeg"), Some("image/jpeg"));
+        assert_eq!(allowed_image_content_type("IMAGE/JPEG"), Some("image/jpeg"));
+        assert_eq!(allowed_image_content_type("image/jpg"), Some("image/jpeg"));
+        assert_eq!(allowed_image_content_type("image/png; charset=binary"), Some("image/png"));
+        assert_eq!(allowed_image_content_type("image/webp"), Some("image/webp"));
+        assert_eq!(allowed_image_content_type("image/avif"), Some("image/avif"));
+        // Nicht-Bilder werden abgelehnt.
+        assert_eq!(allowed_image_content_type("application/json"), None);
+        assert_eq!(allowed_image_content_type("text/html"), None);
+        assert_eq!(allowed_image_content_type(""), None);
+    }
+
+    #[test]
+    fn blocked_ip_covers_private_and_local_ranges() {
+        for ip in [
+            "127.0.0.1",
+            "10.0.0.5",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.169.254", // Cloud-Metadata (Link-Local)
+            "100.64.0.1",      // Carrier-Grade-NAT
+            "0.0.0.0",
+            "::1",
+            "::",
+            "fc00::1",           // Unique-Local
+            "fe80::1",           // Link-Local
+            "::ffff:127.0.0.1",  // IPv4-gemappt
+        ] {
+            assert!(is_blocked_ip(ip.parse().unwrap()), "sollte blockiert sein: {ip}");
+        }
+        for ip in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
+            assert!(!is_blocked_ip(ip.parse().unwrap()), "sollte erlaubt sein: {ip}");
+        }
     }
 }

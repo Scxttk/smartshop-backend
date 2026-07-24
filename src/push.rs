@@ -432,11 +432,20 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
 
     let client = reqwest::blocking::Client::new();
 
+    // Eigener Client fürs Bild-Spiegeln: folgt bewusst KEINEN Redirects, damit
+    // ein 3xx einer Händler-URL nicht auf ein internes Ziel umgelenkt werden
+    // kann (SSRF). Der reguläre `client` für die Supabase-REST-Aufrufe bleibt
+    // unverändert (folgt Redirects wie bisher).
+    let mirror_client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("HTTP-Client fürs Bild-Spiegeln konnte nicht erstellt werden")?;
+
     // Produktbilder in den Storage-Bucket spiegeln, bevor die Zeilen hochgeladen
     // werden — so trägt image_url die stabile Bucket-URL statt der Händler-URL.
     // Im defer_mirror-Modus passiert das erst NACH dem Upsert (Phase 2 unten).
     if opts.mirror_images && !opts.defer_mirror {
-        let (fresh, cached, failed) = mirror_images(&mut groups, cfg, &opts.db_path, &client)?;
+        let (fresh, cached, failed) = mirror_images(&mut groups, cfg, &opts.db_path, &mirror_client)?;
         println!("Bilder: {fresh} neu gespiegelt, {cached} aus Cache, {failed} fehlgeschlagen.");
     }
     let offers_url = format!("{}/rest/v1/offers", cfg.base_url);
@@ -506,7 +515,7 @@ pub fn run(opts: &PushOptions, cfg: Option<&PushConfig>) -> Result<()> {
     // erneut upserten — die App zeigt die Angebote längst, hier kommen nur noch
     // die stabilen Bucket-URLs nach.
     if opts.mirror_images && opts.defer_mirror {
-        let (fresh, cached, failed) = mirror_images(&mut groups, cfg, &opts.db_path, &client)?;
+        let (fresh, cached, failed) = mirror_images(&mut groups, cfg, &opts.db_path, &mirror_client)?;
         println!("Bilder (Phase 2): {fresh} neu gespiegelt, {cached} aus Cache, {failed} fehlgeschlagen.");
         let bucket_marker = format!("/{}/", storage::BUCKET);
         let mirrored: Vec<SupabaseRow> = groups

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use smartshop::models::{Market, Offer};
 use smartshop::push::{self, PushConfig, PushOptions, SupabaseRow, chain_for, dedupe_rows, map_offer};
-use smartshop::{db, units};
+use smartshop::{db, storage, units};
 
 fn offer(title: &str, price: Option<f64>) -> Offer {
     Offer {
@@ -472,18 +472,20 @@ fn dry_run_makes_no_requests() {
 }
 
 #[test]
-fn push_mirrors_images_and_caches_them() {
+fn push_skips_unsafe_image_url_but_uses_cached_bucket_url() {
     let db_path = temp_db("mirror");
     let (base_url, log) = spawn_mock();
 
-    // REWE-Markt + ein Angebot MIT Bild; die Bild-URL zeigt auf den Mock, damit
-    // der Download klappt.
+    // REWE-Markt + ein Angebot MIT Bild. Die Bild-URL zeigt auf den lokalen
+    // Mock (http, Loopback) — also genau das, was der SSRF-Schutz ablehnen
+    // muss: kein https, IP im Loopback-Bereich, Host nicht auf der CDN-Liste.
     let _ = std::fs::remove_file(&db_path);
     let conn = db::open(&db_path).unwrap();
     db::upsert_market(&conn, &Market::new("m1", "REWE Christian Koehler oHG"))
         .unwrap();
     let mut o = offer("Gouda", Some(1.99));
-    o.images = vec![format!("{base_url}/img/gouda.jpg")];
+    let src = format!("{base_url}/img/gouda.jpg");
+    o.images = vec![src.clone()];
     db::upsert_offer(&conn, &o).unwrap();
     drop(conn);
 
@@ -497,44 +499,52 @@ fn push_mirrors_images_and_caches_them() {
         defer_mirror: false,
     };
 
-    // Erster Lauf: Bild laden und in den Bucket hochladen.
+    // Erster Lauf: die unsichere URL wird übersprungen — kein Download, kein
+    // Storage-Upload, aber der Push läuft durch und die Zeile behält die
+    // Händler-URL (Requirement: kein Abbruch, graceful skip).
     push::run(&opts, Some(&cfg)).unwrap();
     let reqs = log.lock().unwrap().clone();
-
     assert!(
-        reqs.iter().any(|r| r.method == "GET" && r.target == "/img/gouda.jpg"),
-        "Bild-Download fehlt: {reqs:#?}"
+        !reqs.iter().any(|r| r.target == "/img/gouda.jpg"),
+        "unsichere Bild-URL wurde geladen: {reqs:#?}"
     );
-    let upload = reqs
-        .iter()
-        .find(|r| r.method == "POST" && r.target.starts_with("/storage/v1/object/offer-images/"))
-        .expect("Storage-Upload fehlt");
-    assert_eq!(upload.header("x-upsert"), Some("true"));
-    assert_eq!(upload.header("apikey"), Some("k"));
-
+    assert!(
+        !reqs.iter().any(|r| r.target.starts_with("/storage/v1/object/offer-images/")),
+        "unsicheres Bild wurde hochgeladen: {reqs:#?}"
+    );
     let offers_post = reqs
         .iter()
         .find(|r| r.method == "POST" && r.target.starts_with("/rest/v1/offers"))
         .expect("Offers-Upsert fehlt");
     assert!(
-        offers_post.body.contains("/storage/v1/object/public/offer-images/"),
-        "image_url zeigt nicht auf den Bucket: {}",
+        offers_post.body.contains("/img/gouda.jpg")
+            && !offers_post.body.contains("/storage/v1/object/public/"),
+        "Zeile muss die Händler-URL behalten: {}",
         offers_post.body
     );
 
-    // Zweiter Lauf: Cache-Treffer -> weder erneuter Download noch Upload.
+    // Cache vorbelegen (stellt einen früheren, erfolgreichen Spiegel-Lauf dar):
+    // der Cache-Treffer greift VOR jedem Netzwerkzugriff, unabhängig vom
+    // SSRF-Schutz.
+    let bucket_url = storage::public_url(&base_url, &storage::object_path(&src));
+    let conn = db::open(&db_path).unwrap();
+    db::cache_image_url(&conn, &src, &bucket_url).unwrap();
+    drop(conn);
+
+    // Zweiter Lauf: Cache-Treffer -> weder Download noch Upload, Zeile trägt die
+    // Bucket-URL.
     log.lock().unwrap().clear();
     push::run(&opts, Some(&cfg)).unwrap();
     let reqs2 = log.lock().unwrap().clone();
     assert!(
         !reqs2.iter().any(|r| r.target.starts_with("/storage/v1/object/offer-images/")),
-        "Bild wurde erneut hochgeladen: {reqs2:#?}"
+        "Bild wurde trotz Cache hochgeladen: {reqs2:#?}"
     );
     assert!(
         !reqs2.iter().any(|r| r.target == "/img/gouda.jpg"),
-        "Bild wurde erneut geladen"
+        "Bild wurde trotz Cache geladen"
     );
-    // Die Zeile trägt trotzdem die Bucket-URL.
+    // Die Zeile trägt jetzt die Bucket-URL aus dem Cache.
     let offers_post2 = reqs2
         .iter()
         .find(|r| r.method == "POST" && r.target.starts_with("/rest/v1/offers"))
@@ -741,8 +751,14 @@ fn deferred_mirror_upserts_offers_before_mirroring() {
     let conn = db::open(&db_path).unwrap();
     db::upsert_market(&conn, &Market::new("m1", "REWE Christian Koehler oHG")).unwrap();
     let mut o = offer("Gouda", Some(1.99));
-    o.images = vec![format!("{base_url}/img/gouda.jpg")];
+    let src = format!("{base_url}/img/gouda.jpg");
+    o.images = vec![src.clone()];
     db::upsert_offer(&conn, &o).unwrap();
+    // Cache vorbelegen: der Bild-Nachtrag (Phase 2) nutzt den Cache-Treffer und
+    // schreibt die Bucket-URL ohne Netzwerkzugriff nach — der SSRF-Schutz würde
+    // die Loopback-URL sonst (korrekt) ablehnen.
+    let bucket_url = storage::public_url(&base_url, &storage::object_path(&src));
+    db::cache_image_url(&conn, &src, &bucket_url).unwrap();
     drop(conn);
 
     let cfg = PushConfig { base_url: base_url.clone(), api_key: "k".to_string() };
@@ -757,13 +773,12 @@ fn deferred_mirror_upserts_offers_before_mirroring() {
     push::run(&opts, Some(&cfg)).unwrap();
 
     let reqs = log.lock().unwrap().clone();
-    let pos = |pred: &dyn Fn(&Req) -> bool| reqs.iter().position(|r| pred(r));
 
     // Phase 1: erster Offers-Upsert trägt die Händler-URL (kein Bucket).
-    let first_upsert = pos(&|r: &Req| {
-        r.method == "POST" && r.target.starts_with("/rest/v1/offers")
-    })
-    .expect("Offers-Upsert fehlt");
+    let first_upsert = reqs
+        .iter()
+        .position(|r| r.method == "POST" && r.target.starts_with("/rest/v1/offers"))
+        .expect("Offers-Upsert fehlt");
     assert!(
         reqs[first_upsert].body.contains("/img/gouda.jpg")
             && !reqs[first_upsert].body.contains("/storage/v1/object/public/"),
@@ -771,26 +786,21 @@ fn deferred_mirror_upserts_offers_before_mirroring() {
         reqs[first_upsert].body
     );
 
-    // Bild-Download und Storage-Upload kommen erst NACH dem ersten Upsert.
-    let download = pos(&|r: &Req| r.method == "GET" && r.target == "/img/gouda.jpg")
-        .expect("Bild-Download fehlt");
-    let upload = pos(&|r: &Req| {
-        r.method == "POST" && r.target.starts_with("/storage/v1/object/offer-images/")
-    })
-    .expect("Storage-Upload fehlt");
-    assert!(first_upsert < download && download < upload, "Reihenfolge: {reqs:#?}");
-
-    // Phase 2: Nachtrag-Upsert mit Bucket-URL und regulärem Konfliktschlüssel.
-    let patch = reqs
+    // Phase 2: Nachtrag-Upsert mit Bucket-URL (aus dem Cache) NACH Phase 1 und
+    // mit regulärem Konfliktschlüssel.
+    let patch_pos = reqs
         .iter()
-        .skip(upload)
-        .find(|r| r.method == "POST" && r.target.starts_with("/rest/v1/offers"))
-        .expect("Bild-Nachtrag-Upsert fehlt");
-    assert!(
-        patch.body.contains("/storage/v1/object/public/offer-images/"),
-        "Phase 2 muss die Bucket-URL nachtragen: {}",
-        patch.body
-    );
+        .enumerate()
+        .skip(first_upsert + 1)
+        .find(|(_, r)| {
+            r.method == "POST"
+                && r.target.starts_with("/rest/v1/offers")
+                && r.body.contains("/storage/v1/object/public/offer-images/")
+        })
+        .map(|(i, _)| i)
+        .expect("Bild-Nachtrag-Upsert mit Bucket-URL fehlt");
+    assert!(first_upsert < patch_pos, "Nachtrag muss nach Phase 1 kommen: {reqs:#?}");
+    let patch = &reqs[patch_pos];
     assert!(
         patch.target.contains("on_conflict=market%2Cproduct%2Cvalid_from%2Cregion")
             || patch.target.contains("on_conflict=market,product,valid_from,region"),
