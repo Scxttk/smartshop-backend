@@ -3,6 +3,7 @@ pub mod db;
 pub mod enrich;
 pub mod matching;
 pub mod models;
+pub mod prune;
 pub mod push;
 pub mod scrapers;
 pub mod storage;

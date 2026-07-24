@@ -198,6 +198,19 @@ enum Command {
         #[arg(long, default_value = "smartshop.db")]
         db: String,
     },
+    /// Verwaiste Bilder aus dem Storage-Bucket `offer-images` entfernen.
+    /// Standard: Dry-Run (zeigt nur, was gelöscht würde). Braucht
+    /// SUPABASE_URL und SUPABASE_SERVICE_KEY in der Umgebung.
+    PruneImages {
+        /// Tatsächlich löschen. Ohne dieses Flag nur anzeigen (Dry-Run).
+        #[arg(long, default_value_t = false)]
+        execute: bool,
+
+        /// Objekte, die jünger als so viele Tage sind, nie löschen — schützt
+        /// gerade gespiegelte Bilder eines laufenden Push/Sync.
+        #[arg(long, default_value_t = 7)]
+        min_age_days: i64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -331,6 +344,10 @@ fn main() -> Result<()> {
             smartshop::sync::run(&opts, None, &fetcher, &finder)
         }
         Command::History { query, db } => history(query, db),
+        Command::PruneImages { execute, min_age_days } => {
+            let opts = smartshop::prune::PruneOptions { execute, min_age_days };
+            smartshop::prune::run(&opts, None)
+        }
     }
 }
 
