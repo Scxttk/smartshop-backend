@@ -177,54 +177,69 @@ fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
 /// aktuellen iPhones (Retina), spart aber gegenüber Voll-Auflösungs-CDN-Bildern
 /// ein Vielfaches an Bucket-Speicher.
 const MAX_IMAGE_EDGE: u32 = 1200;
-/// JPEG-Qualität beim Re-Encoden verkleinerter Bilder (0–100).
+/// JPEG-Qualität beim Re-Encoden verkleinerter JPEGs (0–100).
 const JPEG_QUALITY: u8 = 82;
+/// WebP-Qualität beim Re-Encoden von PNGs (0.0–100.0, lossy).
+const WEBP_QUALITY: f32 = 80.0;
 
-/// Verkleinert überdimensionierte JPEG/PNG-Bilder auf `MAX_IMAGE_EDGE` px
-/// Kantenlänge und re-encodet sie, damit der `offer-images`-Bucket unter dem
-/// Storage-Free-Limit bleibt (die CDN-Bilder kommen teils in Voll-Auflösung
-/// mit bis zu ~2 MB).
+/// Verkleinert/re-encodet ein Bild vor dem Bucket-Upload, damit der
+/// `offer-images`-Bucket unter dem Storage-Free-Limit bleibt (die CDN-Bilder
+/// kommen teils in Voll-Auflösung: JPEGs bis ~1 MB, Produkt-Freisteller als
+/// 1200×1200-**PNGs** mit bis zu ~2.6 MB).
 ///
-/// Das Format bleibt erhalten (JPEG→JPEG, PNG→PNG): so bleibt der
-/// content-adressierte Objektpfad (`object_path`, an der Quell-Endung hängend)
-/// stabil — ein erneuter Sync überschreibt via `x-upsert` denselben Pfad,
-/// statt Verwaiste zu erzeugen — und PNG-Transparenz geht nicht verloren.
+/// - **JPEG**: nur wenn überdimensioniert → auf `MAX_IMAGE_EDGE` px kappen und
+///   mit `JPEG_QUALITY` neu encoden; sonst `None` (JPEG ist schon kompakt).
+/// - **PNG**: immer → **WebP lossy** (`WEBP_QUALITY`), vorher bei Bedarf kappen.
+///   PNG komprimiert Fotos praktisch nicht (die Freisteller wiegen ~2 MB); WebP
+///   drückt sie ~90 %, **erhält aber die Transparenz** — anders als JPEG, das
+///   den Alpha-Kanal auf eine harte Hintergrundfarbe plätten würde.
 ///
-/// Liefert `None` (→ Original unverändert hochladen), wenn das Bild bereits
-/// klein genug ist, ein anderes Format hat (webp/gif/avif — bereits kompakt
-/// bzw. selten) oder Dekodierung/Enkodierung fehlschlägt. Ein Downscaling-
-/// Fehler darf den Push nie abbrechen.
+/// Der content-adressierte Objektpfad (`object_path`) hängt an der **Quell**-
+/// Endung und bleibt dadurch stabil, auch wenn wir PNG→WebP re-encoden: ein
+/// erneuter Sync überschreibt via `x-upsert` denselben Pfad (kein Orphan-Churn),
+/// der zurückgegebene Content-Type (`image/webp`) sorgt fürs korrekte Ausliefern
+/// — iOS/Browser dekodieren nach Inhalt, nicht nach Datei-Endung.
+///
+/// Liefert `None` (→ Original unverändert hochladen) bei bereits kleinen JPEGs,
+/// anderen Formaten (webp/gif/avif — bereits kompakt bzw. selten) oder wenn
+/// Dekodierung/Enkodierung fehlschlägt. Ein Downscaling-Fehler darf den Push
+/// nie abbrechen.
 fn downscale(bytes: &[u8], content_type: &str) -> Option<(Vec<u8>, &'static str)> {
-    let format = match content_type {
-        "image/jpeg" => image::ImageFormat::Jpeg,
-        "image/png" => image::ImageFormat::Png,
-        _ => return None,
-    };
-    let img = image::load_from_memory_with_format(bytes, format).ok()?;
-    if img.width() <= MAX_IMAGE_EDGE && img.height() <= MAX_IMAGE_EDGE {
-        return None; // schon innerhalb des Limits — Original unangetastet lassen
-    }
-    // resize() erhält das Seitenverhältnis und passt in die Box MAX×MAX.
-    let resized = img.resize(
-        MAX_IMAGE_EDGE,
-        MAX_IMAGE_EDGE,
-        image::imageops::FilterType::Lanczos3,
-    );
-    let mut out = std::io::Cursor::new(Vec::new());
-    let ct: &'static str = match format {
-        image::ImageFormat::Jpeg => {
+    match content_type {
+        "image/jpeg" => {
+            let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg).ok()?;
+            if img.width() <= MAX_IMAGE_EDGE && img.height() <= MAX_IMAGE_EDGE {
+                return None; // schon innerhalb des Limits — Original unangetastet
+            }
+            let resized = img.resize(
+                MAX_IMAGE_EDGE,
+                MAX_IMAGE_EDGE,
+                image::imageops::FilterType::Lanczos3,
+            );
+            let mut out = std::io::Cursor::new(Vec::new());
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY)
                 .encode_image(&resized)
                 .ok()?;
-            "image/jpeg"
+            Some((out.into_inner(), "image/jpeg"))
         }
-        // PNG behält Transparenz; Standard-Kompression des png-Crates.
-        _ => {
-            resized.write_to(&mut out, image::ImageFormat::Png).ok()?;
-            "image/png"
+        "image/png" => {
+            let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?;
+            // Nur kappen, wenn überdimensioniert; resize() erhält das Seitenverhältnis.
+            let img = if img.width() > MAX_IMAGE_EDGE || img.height() > MAX_IMAGE_EDGE {
+                img.resize(
+                    MAX_IMAGE_EDGE,
+                    MAX_IMAGE_EDGE,
+                    image::imageops::FilterType::Lanczos3,
+                )
+            } else {
+                img
+            };
+            // WebP lossy; Alpha wird von libwebp erhalten (verlustfrei kodiert).
+            let encoded = webp::Encoder::from_image(&img).ok()?.encode(WEBP_QUALITY);
+            Some((encoded.to_vec(), "image/webp"))
         }
-    };
-    Some((out.into_inner(), ct))
+        _ => None,
+    }
 }
 
 /// Bild vom Händler laden und in den Bucket hochladen; liefert die öffentliche
@@ -396,6 +411,29 @@ mod tests {
         out.into_inner()
     }
 
+    /// Verrauschtes RGBA-Bild (schlecht komprimierbar, etwas Transparenz), als
+    /// PNG encodet — so ist das PNG groß genug, dass WebP messbar gewinnt.
+    fn noisy_png(w: u32, h: u32) -> Vec<u8> {
+        let mut img = image::RgbaImage::new(w, h);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            let r = ((x * 7 + y * 13) % 256) as u8;
+            let g = ((x * 3 + y * 5) % 256) as u8;
+            let b = ((x ^ y) % 256) as u8;
+            let a = if (x + y) % 9 == 0 { 0 } else { 255 }; // echte Transparenz
+            *px = image::Rgba([r, g, b, a]);
+        }
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut out, image::ImageFormat::Png)
+            .unwrap();
+        out.into_inner()
+    }
+
+    /// WebP-Signatur: `RIFF`…`WEBP`.
+    fn is_webp(bytes: &[u8]) -> bool {
+        bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP"
+    }
+
     #[test]
     fn downscale_shrinks_oversized_jpeg() {
         let bytes = encode_test_image(2000, 1500, image::ImageFormat::Jpeg);
@@ -408,17 +446,32 @@ mod tests {
     }
 
     #[test]
-    fn downscale_shrinks_oversized_png() {
-        let bytes = encode_test_image(1600, 1600, image::ImageFormat::Png);
-        let (scaled, ct) = downscale(&bytes, "image/png").expect("sollte verkleinern");
-        assert_eq!(ct, "image/png");
-        let img = image::load_from_memory(&scaled).unwrap();
-        assert!(img.width() <= MAX_IMAGE_EDGE && img.height() <= MAX_IMAGE_EDGE);
+    fn downscale_png_becomes_smaller_webp() {
+        // Großes PNG -> WebP: als WebP ausgegeben und deutlich kleiner.
+        let png = noisy_png(1600, 1600);
+        let (out, ct) = downscale(&png, "image/png").expect("PNG sollte zu WebP werden");
+        assert_eq!(ct, "image/webp");
+        assert!(is_webp(&out), "Output sollte WebP-Signatur haben");
+        assert!(
+            out.len() < png.len(),
+            "WebP ({}) sollte kleiner als PNG ({}) sein",
+            out.len(),
+            png.len()
+        );
     }
 
     #[test]
-    fn downscale_leaves_small_and_foreign_formats_untouched() {
-        // Bild innerhalb des Limits -> None (Original unverändert hochladen).
+    fn downscale_small_png_still_converts_to_webp() {
+        // Auch PNGs innerhalb des Limits werden zu WebP (Alpha bleibt, kompakter).
+        let png = noisy_png(400, 300);
+        let (out, ct) = downscale(&png, "image/png").expect("auch kleines PNG -> WebP");
+        assert_eq!(ct, "image/webp");
+        assert!(is_webp(&out));
+    }
+
+    #[test]
+    fn downscale_leaves_small_jpeg_and_foreign_formats_untouched() {
+        // JPEG innerhalb des Limits -> None (Original unverändert hochladen).
         let small = encode_test_image(400, 300, image::ImageFormat::Jpeg);
         assert!(downscale(&small, "image/jpeg").is_none());
         // Andere Formate werden nicht angefasst.
@@ -426,6 +479,7 @@ mod tests {
         assert!(downscale(b"nonsense", "image/gif").is_none());
         // Kaputte Bytes -> None statt Panik (kein Push-Abbruch).
         assert!(downscale(b"not an image", "image/jpeg").is_none());
+        assert!(downscale(b"not a png", "image/png").is_none());
     }
 
     #[test]
