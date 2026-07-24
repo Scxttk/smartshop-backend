@@ -215,6 +215,21 @@ jobs:
           fi
           echo "$COUNT Angebote in der DB."
 
+      # Verwaiste Bucket-Bilder aufräumen: der Push löscht veraltete offer-Zeilen
+      # (push.rs), aber nie ihre gespiegelten Bilder — der offer-images-Bucket
+      # wuchs so über das Free-Limit. Nur beim vollen
+      # Nightly-Sync (nicht bei On-Demand-per-PLZ) und nur Objekte älter als
+      # 1 Tag: das schützt frisch Gespiegeltes gegen parallel laufende
+      # On-Demand-Läufe, die ihre Bilder noch nicht in offers.image_url haben.
+      - name: Prune orphaned bucket images
+        if: inputs.plz == ''
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          ./target/release/smartshop prune-images --execute --min-age-days 1 \
+            2>&1 | tee -a "$LOG"
+
       - name: Upload run log
         if: always()
         uses: actions/upload-artifact@v4
