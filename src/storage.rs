@@ -171,6 +171,62 @@ fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
     (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80
 }
 
+/// Maximale Kantenlänge (px) eines gespiegelten Bildes. Größere Bilder werden
+/// unter Erhalt des Seitenverhältnisses hierauf verkleinert. ~1200 px reicht
+/// für die Produkt-Kacheln der App und eine Vollbild-Detailansicht auch auf
+/// aktuellen iPhones (Retina), spart aber gegenüber Voll-Auflösungs-CDN-Bildern
+/// ein Vielfaches an Bucket-Speicher.
+const MAX_IMAGE_EDGE: u32 = 1200;
+/// JPEG-Qualität beim Re-Encoden verkleinerter Bilder (0–100).
+const JPEG_QUALITY: u8 = 82;
+
+/// Verkleinert überdimensionierte JPEG/PNG-Bilder auf `MAX_IMAGE_EDGE` px
+/// Kantenlänge und re-encodet sie, damit der `offer-images`-Bucket unter dem
+/// Storage-Free-Limit bleibt (die CDN-Bilder kommen teils in Voll-Auflösung
+/// mit bis zu ~2 MB).
+///
+/// Das Format bleibt erhalten (JPEG→JPEG, PNG→PNG): so bleibt der
+/// content-adressierte Objektpfad (`object_path`, an der Quell-Endung hängend)
+/// stabil — ein erneuter Sync überschreibt via `x-upsert` denselben Pfad,
+/// statt Verwaiste zu erzeugen — und PNG-Transparenz geht nicht verloren.
+///
+/// Liefert `None` (→ Original unverändert hochladen), wenn das Bild bereits
+/// klein genug ist, ein anderes Format hat (webp/gif/avif — bereits kompakt
+/// bzw. selten) oder Dekodierung/Enkodierung fehlschlägt. Ein Downscaling-
+/// Fehler darf den Push nie abbrechen.
+fn downscale(bytes: &[u8], content_type: &str) -> Option<(Vec<u8>, &'static str)> {
+    let format = match content_type {
+        "image/jpeg" => image::ImageFormat::Jpeg,
+        "image/png" => image::ImageFormat::Png,
+        _ => return None,
+    };
+    let img = image::load_from_memory_with_format(bytes, format).ok()?;
+    if img.width() <= MAX_IMAGE_EDGE && img.height() <= MAX_IMAGE_EDGE {
+        return None; // schon innerhalb des Limits — Original unangetastet lassen
+    }
+    // resize() erhält das Seitenverhältnis und passt in die Box MAX×MAX.
+    let resized = img.resize(
+        MAX_IMAGE_EDGE,
+        MAX_IMAGE_EDGE,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let mut out = std::io::Cursor::new(Vec::new());
+    let ct: &'static str = match format {
+        image::ImageFormat::Jpeg => {
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY)
+                .encode_image(&resized)
+                .ok()?;
+            "image/jpeg"
+        }
+        // PNG behält Transparenz; Standard-Kompression des png-Crates.
+        _ => {
+            resized.write_to(&mut out, image::ImageFormat::Png).ok()?;
+            "image/png"
+        }
+    };
+    Some((out.into_inner(), ct))
+}
+
 /// Bild vom Händler laden und in den Bucket hochladen; liefert die öffentliche
 /// Bucket-URL. Idempotent dank content-adressiertem Pfad + `x-upsert` — ein
 /// erneuter Aufruf für dasselbe Bild überschreibt dasselbe Objekt.
@@ -206,6 +262,14 @@ pub fn mirror(
     };
     let bytes = resp.bytes().context("Bild-Bytes lesen fehlgeschlagen")?;
 
+    // Überdimensionierte Bilder vor dem Upload verkleinern, damit der Bucket
+    // unter dem Storage-Free-Limit bleibt. Bei zu kleinen Bildern, anderen
+    // Formaten oder Fehlern bleibt das Original (und sein Content-Type).
+    let (body, content_type): (Vec<u8>, &str) = match downscale(&bytes, content_type) {
+        Some((scaled, ct)) => (scaled, ct),
+        None => (bytes.to_vec(), content_type),
+    };
+
     // In den Bucket hochladen (idempotent via x-upsert).
     let upload_url = format!("{}/storage/v1/object/{BUCKET}/{path}", cfg.base_url);
     let resp = client
@@ -214,7 +278,7 @@ pub fn mirror(
         .header("Authorization", format!("Bearer {}", cfg.api_key))
         .header("Content-Type", content_type)
         .header("x-upsert", "true")
-        .body(bytes)
+        .body(body)
         .send()
         .with_context(|| format!("Bild-Upload fehlgeschlagen: {path}"))?;
     if !resp.status().is_success() {
@@ -320,6 +384,48 @@ mod tests {
         assert_eq!(allowed_image_content_type("application/json"), None);
         assert_eq!(allowed_image_content_type("text/html"), None);
         assert_eq!(allowed_image_content_type(""), None);
+    }
+
+    // --------------------------------------------------------- Downscaling
+
+    /// Erzeugt ein einfarbiges Bild der gegebenen Größe als encodete Bytes.
+    fn encode_test_image(w: u32, h: u32, format: image::ImageFormat) -> Vec<u8> {
+        let img = image::DynamicImage::ImageRgb8(image::RgbImage::new(w, h));
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, format).unwrap();
+        out.into_inner()
+    }
+
+    #[test]
+    fn downscale_shrinks_oversized_jpeg() {
+        let bytes = encode_test_image(2000, 1500, image::ImageFormat::Jpeg);
+        let (scaled, ct) = downscale(&bytes, "image/jpeg").expect("sollte verkleinern");
+        assert_eq!(ct, "image/jpeg");
+        let img = image::load_from_memory(&scaled).unwrap();
+        assert!(img.width() <= MAX_IMAGE_EDGE && img.height() <= MAX_IMAGE_EDGE);
+        // Seitenverhältnis bleibt erhalten (Breite ist die längere Kante).
+        assert_eq!(img.width(), MAX_IMAGE_EDGE);
+    }
+
+    #[test]
+    fn downscale_shrinks_oversized_png() {
+        let bytes = encode_test_image(1600, 1600, image::ImageFormat::Png);
+        let (scaled, ct) = downscale(&bytes, "image/png").expect("sollte verkleinern");
+        assert_eq!(ct, "image/png");
+        let img = image::load_from_memory(&scaled).unwrap();
+        assert!(img.width() <= MAX_IMAGE_EDGE && img.height() <= MAX_IMAGE_EDGE);
+    }
+
+    #[test]
+    fn downscale_leaves_small_and_foreign_formats_untouched() {
+        // Bild innerhalb des Limits -> None (Original unverändert hochladen).
+        let small = encode_test_image(400, 300, image::ImageFormat::Jpeg);
+        assert!(downscale(&small, "image/jpeg").is_none());
+        // Andere Formate werden nicht angefasst.
+        assert!(downscale(&small, "image/webp").is_none());
+        assert!(downscale(b"nonsense", "image/gif").is_none());
+        // Kaputte Bytes -> None statt Panik (kein Push-Abbruch).
+        assert!(downscale(b"not an image", "image/jpeg").is_none());
     }
 
     #[test]

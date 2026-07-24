@@ -19,3 +19,8 @@ scraper = "0.20"
 axum = "0.8"
 regex = "1.13.1"
 sha2 = "0.10"
+# Nur JPEG+PNG (Decode/Encode) — die Bilder werden vor dem Bucket-Upload auf
+# eine Kantenlänge gekappt (storage.rs::downscale), um unter dem Storage-Free-
+# Limit zu bleiben. Andere Formate (webp/gif/avif) gehen unverändert durch,
+# daher deren Features bewusst aus.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
