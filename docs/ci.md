@@ -85,6 +85,56 @@ select vault.update_secret(
 — oder einfacher: Secret im Dashboard unter „Vault" aktualisieren.
 Die Migration muss dafür nicht neu laufen.
 
+## On-Demand-Regionen absichern: Migration v11
+
+Die ursprüngliche v3-Policy „Anon insert" war `with check (true)` — mit dem
+**öffentlichen anon-Key** konnte damit jeder (a) beliebige Werte in die
+Queue-Steuerspalten `active`/`last_synced`/`requested_at` schreiben und die
+Sync-Queue vergiften, und (b) über den SECURITY-DEFINER-Trigger
+`trigger_region_scrape` unbegrenzt `workflow_dispatch`-Aufrufe auslösen
+(bezahlt vom hinterlegten PAT). [`supabase/migration_v11_region_insert_hardening.sql`](../supabase/migration_v11_region_insert_hardening.sql)
+schließt das (**einmal im SQL-Editor ausführen**, idempotent):
+
+- **Spalten-Härtung.** Die Policy „Anon insert" prüft jetzt
+  `plz ~ '^[0-9]{5}$' and active is true and last_synced is null and
+  requested_at is not null`, und auf Privilegienebene wird das INSERT-Recht
+  von anon/authenticated auf **nur die Spalte `plz`** eingeschränkt
+  (`revoke insert … ; grant insert (plz) …`). Der legitime App-Pfad
+  `insert into regions (plz) values ('12345')` bleibt unverändert: die
+  Steuerspalten füllen ihre Defaults (`requested_at` = `now()`,
+  `active` = true, `last_synced` = null).
+- **Cooldown pro PLZ statt globalem Budget.** Der Trigger feuert einen
+  Dispatch pro PLZ höchstens alle 10 Minuten (protokolliert in
+  `public.region_dispatch_log`). Das dedupliziert **nur** wiederholte
+  Anfragen für **dieselbe** Region — es gibt **kein** geteiltes globales
+  Limit, das die Erst-Anfrage einer fremden, frischen PLZ blockieren
+  könnte. Eine frische, nicht kürzlich dispatchte PLZ bekommt **immer**
+  ihren einen Dispatch.
+
+> **Hinweis:** `revoke execute on function …` stoppt den Trigger **nicht** —
+> Postgres prüft das EXECUTE-Recht nur einmal beim `CREATE TRIGGER`. Jedes
+> Ratenlimit muss deshalb im Funktionskörper sitzen (dort sitzt der
+> Cooldown), nicht über GRANTs.
+
+### Verbleibendes Risiko und empfohlener Folgeschritt
+
+Der PLZ-Cooldown begrenzt zuverlässig die **Wiederholungs-Verstärkung**
+(gleiche PLZ immer wieder), **nicht** aber eine **Distinct-PLZ-Flut**: ein
+Angreifer mit dem anon-Key kann viele **unterschiedliche** gültige PLZs
+einfügen und je einmal einen Dispatch auslösen. Trigger-seitig lässt sich
+das **nicht** abwehren, ohne legitime Erst-Anfragen fremder Nutzer zu
+unterdrücken — am Trigger liegt keine Aufrufer-Identität vor, weil die App
+den **geteilten** anon-Key nutzt. Bewusst wird deshalb **kein** globales
+Budget geschaltet (das würde die Confused-Deputy-Flut nur gegen eine
+Denial-of-Service gegen legitime Nutzer eintauschen).
+
+**Empfohlener Folgeschritt** (echte strukturelle Lösung): Regionen-Anfragen
+über eine **authentifizierte, ratenbegrenzte Edge Function** routen bzw. in
+der Policy `auth.role() = 'authenticated'` verlangen und pro Installation
+(Auth-Identität) eine Quota erzwingen. Erst mit einer Aufrufer-Identität
+lässt sich die Distinct-PLZ-Flut fair drosseln, ohne andere Nutzer zu
+treffen.
+
 ## Produktbilder: einmalige Migrationen v5 + v6
 
 Der Push schreibt seit v5 pro Angebot eine Produktbild-URL und spiegelt die
