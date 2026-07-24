@@ -33,6 +33,7 @@ import datetime
 import importlib.util
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -188,34 +189,74 @@ def build_cases(rows):
     return actionable, counted
 
 
+def _sanitize(value, limit=None):
+    """Steuerzeichen aus einem `match_feedback`-Feld entfernen, bevor es ausgegeben wird.
+
+    Die Tabelle ist anon-beschreibbar und ohne Inhaltsprüfung; eingeschleuste
+    ANSI-/CSI-Sequenzen würden sonst vom Terminal des Betreuers interpretiert und
+    könnten Reportzeilen überschreiben oder verstecken. Zeilen-/Tabulatorumbrüche
+    werden zu einem Leerzeichen (jede Meldung bleibt auf ihrer Zeile), übrige
+    C0-/DEL-/C1-Steuerzeichen zu „?". Normaler Text inklusive Umlauten bleibt
+    unangetastet (die liegen oberhalb von \\x9f).
+
+    >>> _sanitize("Käse\\x1b[2Kboo")
+    'Käse?[2Kboo'
+    >>> _sanitize("zwei\\nZeilen")
+    'zwei Zeilen'
+    """
+    if value is None:
+        return value
+    text = re.sub(r"[\t\n\r\v\f]", " ", str(value))
+    text = re.sub(r"[\x00-\x1f\x7f-\x9f]", "?", text)
+    if limit is not None and len(text) > limit:
+        text = text[:limit]
+    return text
+
+
+def _sanitize_case(case):
+    """Kopie eines Falls, in der alle aus `match_feedback` stammenden Textfelder
+    von Steuerzeichen befreit sind — für die --json-Ausgabe, die denselben
+    ungeprüften Text sonst an nachgelagerte Verbraucher weiterreicht. `terms` und
+    `candidates` stammen aus dem Wörterbuch bzw. sind schon durch `ev.norm`
+    gelaufen und enthalten keine Steuerzeichen."""
+    clean = dict(case)
+    clean["query"] = _sanitize(case["query"])
+    clean["product_title"] = _sanitize(case["product_title"])
+    clean["markets"] = [_sanitize(m) for m in case["markets"]]
+    clean["match_kinds"] = [_sanitize(k) for k in case["match_kinds"]]
+    clean["reasons"] = {_sanitize(r): n for r, n in case["reasons"].items()}
+    clean["comments"] = [_sanitize(c) for c in case["comments"]]
+    return clean
+
+
 def print_report(rows, actionable, counted):
     total = len(rows)
     by_reason = Counter(r["reason"] for r in rows)
     print(f"Rückmeldungen: {total}")
     for reason, count in by_reason.most_common():
         mark = "→ Wörterbuch" if reason in ACTIONABLE else "  nur zählen"
-        print(f"  {reason:16s} {count:4d}   {mark}")
+        print(f"  {_sanitize(reason):16s} {count:4d}   {mark}")
     print(f"\nFälle mit möglicher Wörterbuchänderung: {len(actionable)}")
     print(f"Fälle ohne (Menge/Vorliebe):            {len(counted)}")
 
     if counted:
         print("\n== Nur gezählt (keine Änderung) ==")
         for case in counted:
-            reasons = ", ".join(f"{r}×{n}" for r, n in case["reasons"].items())
-            print(f"  {case['count']:3d}× „{case['query']}“ → {case['product_title'][:50]}  ({reasons})")
+            reasons = ", ".join(f"{_sanitize(r)}×{n}" for r, n in case["reasons"].items())
+            print(f"  {case['count']:3d}× „{_sanitize(case['query'])}“ → {_sanitize(case['product_title'], 50)}  ({reasons})")
 
     print("\n== Vorschlagsfragen ==")
     if not actionable:
         print("  (nichts zu tun)")
     for index, case in enumerate(actionable, 1):
         print(f"\n--- Fall {index} ---")
-        print(f"Suchbegriff : {case['query']}")
-        print(f"Produkt     : {case['product_title']}")
-        print(f"Markt/Art   : {', '.join(case['markets'])} / {', '.join(case['match_kinds'])}")
-        reasons = ", ".join(f"{r}×{n}" for r, n in case["reasons"].items())
+        print(f"Suchbegriff : {_sanitize(case['query'])}")
+        print(f"Produkt     : {_sanitize(case['product_title'])}")
+        print(f"Markt/Art   : {', '.join(_sanitize(m) for m in case['markets'])} / {', '.join(_sanitize(k) for k in case['match_kinds'])}")
+        reasons = ", ".join(f"{_sanitize(r)}×{n}" for r, n in case["reasons"].items())
         print(f"Meldungen   : {case['count']} ({reasons})")
         for comment in case["comments"][:3]:
-            print(f"Kommentar   : {comment[:120]}")
+            print(f"Kommentar   : {_sanitize(comment, 120)}")
 
         if "direct" in case["match_kinds"]:
             print("Eintrag     : keiner — Direkttreffer, das Suchwort stand wörtlich im Titel.")
@@ -236,7 +277,7 @@ def print_report(rows, actionable, counted):
             print(f"  block  : {block}")
             candidates = case["candidates"][term]
             print(f"  Kandidaten für block: {candidates}")
-            print(f'  Frage: Suchbegriff „{case["query"]}“, Produkt „{case["product_title"]}“ —')
+            print(f'  Frage: Suchbegriff „{_sanitize(case["query"])}“, Produkt „{_sanitize(case["product_title"])}“ —')
             if candidates:
                 print(f"         welches Token gehört auf die Blockliste von „{term}“,")
                 print(f"         ohne echte {term}-Treffer zu verlieren?")
@@ -280,7 +321,8 @@ def main():
 
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as handle:
-            json.dump({"actionable": actionable, "counted": counted},
+            json.dump({"actionable": [_sanitize_case(c) for c in actionable],
+                       "counted": [_sanitize_case(c) for c in counted]},
                       handle, ensure_ascii=False, indent=1)
         print(f"\nFälle geschrieben: {args.json_out}")
 
